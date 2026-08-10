@@ -125,6 +125,8 @@ programs is BDOS coverage, not CPU emulation.
 | `cpm86run_unicorn.py` | independent Unicorn/QEMU runner + BDOS console group |
 | `CPM-86_Programmers_Guide_Jan83.pdf` | Digital Research reference manual (BDOS calls, `.CMD` format, base page) |
 | `CPM-86_Programmers_Guide_Jan83.txt` | plain-text extraction of the manual (grep-able) |
+| `CPM-86_System_Guide_Jun83.pdf` | DR System Guide — BDOS & BIOS call reference, `.CMD` format |
+| `CPM-86_System_Guide_Jun83.txt` | plain-text extraction of the System Guide (grep-able) |
 | `README-cpm86.md` | this document |
 
 ## Reference
@@ -132,6 +134,9 @@ programs is BDOS coverage, not CPU emulation.
 `CPM-86_Programmers_Guide_Jan83.pdf` is the authoritative Digital Research
 *CP/M-86 Operating System Programmer's Guide* (Jan 1983). It documents the BDOS
 function numbers, the `.CMD` command-file / group-descriptor format, the base
-page, and the segment/entry conventions this PoC implements. Mirrored from
+page, and the segment/entry conventions this PoC implements. The companion
+*CP/M-86 System Guide* (`CPM-86_System_Guide_Jun83.pdf`) is the reference for
+the **BDOS and BIOS call interface** (function numbers, register conventions,
+FCB layout). Both are mirrored from
 [bitsavers](http://www.bitsavers.org/pdf/digitalResearch/cpm-86/); the CP/M
 documentation was released for free non-commercial use by the copyright holder.
