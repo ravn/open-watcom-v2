@@ -272,7 +272,38 @@ Transferring the `.CMD` files onto a CP/M-86 disk image is automated with
 ```
 
 Then mount `cpm86.img` as a drive in the emulator and run e.g. `HELLO` or
-`DHRY`. The `.CMD` files round-trip through the image byte-identically.
+`DHRY`. The `.CMD` files round-trip through the image byte-identically, and the
+image is padded to the drive's full geometry so a full-machine emulator accepts
+it.
+
+### RC759 "Piccoline" / Concurrent CP/M-86
+
+The Regnecentralen **RC759 Piccoline** is an **80186** machine running
+**Concurrent CP/M-86** — an ideal real target, and its dedicated emulator is
+**PCE** by Hampa Hug (see `https://rc700.dk/emulator.php`, which also links a
+browser-based build); MAME has an `rc759` driver too, though it is still marked
+non-working as of 2026. Concurrent CP/M-86 is a BDOS-compatible superset, so our
+`INT 0E0h` console programs run unmodified — and, unlike plain CP/M-86 1.x, it
+*does* provide date/time (BDOS 104/105).
+
+Build for the 80186 (`CPU=1`) and pack an RC759-format image:
+
+```
+CPU=1 ./build-cpm86.sh dhry.c
+FORMAT=rc75x ./mkdisk-cpm86.sh rc759.img HELLO.CMD DHRY.CMD
+```
+
+`rc75x` is the RC759 geometry (77 cyl × 2 heads × 8 × 1024-byte sectors); the
+script pads the image to the full 1,261,568 bytes. PCE's floppy format is
+`.pbit`, so convert the raw image with the `pfdc`/`pbit` tools bundled with PCE
+(the script prints the exact commands):
+
+```
+pfdc -r 0-76 0-1 1-8 -p new -e size 1024 -e mfm-hd 1 -p load rc759.img -o rc759.pfdc
+pbit -p encode mfm-hd-360 rc759.pfdc -o rc759.pbit
+```
+
+then, in the emulator monitor, `-m fdc.insert 0:rc759.pbit`.
 
 **Portability caveat:** `HELLO`, `ECHOARG` and `DHRY` use only standard BDOS
 console calls and run unmodified on real CP/M-86. `BIGDATA` addresses a
