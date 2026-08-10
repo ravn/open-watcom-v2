@@ -30,31 +30,54 @@ CMD=$(echo "$STEM" | tr '[:lower:]' '[:upper:]').CMD
 # 80186+ opcodes fine). Override with e.g.  CPU=1 ./build-cpm86.sh hello.asm
 CPU=${CPU:-0}
 
-# 1. Assemble or compile to an OMF object.
+# Tool names. A full Open Watcom install provides wasm/wcc/wl; a fresh
+# bootstrap build (./build.sh preboot + builder boot, or ci/buildx.sh with
+# OWBUILD_STAGE=boot) only provides the b-prefixed bootstrap cross-tools in
+# build/binbuild (bwasm/bwcc/bwlink). Prefer the released names, fall back to
+# the bootstrap ones so this script works straight after a boot build.
+pick() { for t in "$@"; do command -v "$t" >/dev/null 2>&1 && { echo "$t"; return; }; done; echo "$1"; }
+WASM=$(pick wasm bwasm)
+WCC=$(pick wcc bwcc)
+WLINK=$(pick wl wlink bwlink)
+
+# Assembler/linker/wrapper differ slightly between the asm and C paths:
+#
+#   * asm source uses 'org 100h', so wl already emits the 100H base-page
+#     padding in the raw image and 'end start_' fixes the entry point. We wrap
+#     with --no-basepage (padding is already there).
+#   * C source has no 'org'; wcc names the entry symbol with a trailing '_'
+#     (default __watcall), so the C function start_() is the object symbol
+#     start__. We link with 'option offset=0x100' so all addresses assume a
+#     load at 0100H, and let bin2cmd.py reserve the 100H base page (do NOT pass
+#     --no-basepage) so the code lands at 0100H to match.
+#
+# 1. Assemble or compile to an OMF object; 2. link to a flat binary image;
+# 3. wrap in the CP/M-86 .CMD header. The "stack segment not found" warning is
+# expected and harmless for a freestanding CP/M-86 image.
 case "$EXT" in
     asm)
-        wasm "-$CPU" "$SRC" -fo="$STEM.obj"
+        "$WASM" "-$CPU" "$SRC" -fo="$STEM.obj"
+        "$WLINK" format raw bin \
+           option quiet \
+           name "$STEM.bin" \
+           file "$STEM.obj"
+        python3 "$HERE/bin2cmd.py" "$STEM.bin" "$CMD" --no-basepage
         ;;
     c)
-        # 16-bit x86 (-$CPU), tiny model (-mt), no stack checks (-s).
-        wcc "-$CPU" -mt -s -oi -zl "$SRC" -fo="$STEM.obj"
+        # 16-bit x86 (-$CPU), small model (-ms; OW has no separate tiny model),
+        # no stack checks (-s), intrinsics on (-oi), no default library refs
+        # (-zl). __watcall appends '_' to the entry symbol -> start__.
+        "$WCC" "-$CPU" -ms -s -oi -zl "$SRC" -fo="$STEM.obj"
+        "$WLINK" format raw bin \
+           option quiet, start=start__, offset=0x100 \
+           name "$STEM.bin" \
+           file "$STEM.obj"
+        python3 "$HERE/bin2cmd.py" "$STEM.bin" "$CMD"
         ;;
     *)
         echo "build-cpm86.sh: unknown source type: .$EXT" >&2
         exit 1
         ;;
 esac
-
-# 2. Link to a flat binary image. Code is assembled at org 100h (after the
-#    100H-byte base page); for the 8080 model CP/M-86 enters at CS:0100H.
-wl format raw bin \
-   option quiet, start=start_ \
-   name "$STEM.bin" \
-   file "$STEM.obj"
-
-# 3. Prepend the CP/M-86 .CMD header and reserve the 100H-byte base page
-#    (8080 / single-group model). If wl already emits the 100H org padding in
-#    the raw image, add --no-basepage here to avoid reserving it twice.
-python3 "$HERE/bin2cmd.py" "$STEM.bin" "$CMD"
 
 echo "Built $CMD"

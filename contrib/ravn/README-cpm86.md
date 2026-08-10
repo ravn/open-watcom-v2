@@ -96,10 +96,11 @@ python3 cpm86run_unicorn.py ECHOARG.CMD one two.dat   ->   " ONE TWO.DAT"
 
 ### Ready-to-run artifact: `HELLO.CMD`
 
-`HELLO.CMD` in this folder is a **complete, runnable** CP/M-86 executable built
-by hand-assembling `hello.asm` (org 100h) and wrapping it with `bin2cmd.py`
-(which reserves the `100H`-byte base page) — so you can test the pipeline in an
-emulator before building the OW toolchain. Code layout (after the base page):
+`HELLO.CMD` in this folder is a **complete, runnable** CP/M-86 executable. It is
+now produced by the real Open Watcom toolchain (`build-cpm86.sh hello.asm`:
+`wasm` → `wl format raw` → `bin2cmd.py`); the resulting file is byte-identical
+to the earlier hand-assembled reference, which validates both the pipeline and
+the hand analysis. Code layout (after the base page):
 
 ```
 0100: 0e 1f ba 0d 01 b1 09 cd e0       ; push cs; pop ds; mov dx,msg; mov cl,9; int E0h
@@ -107,16 +108,31 @@ emulator before building the OW toolchain. Code layout (after the base page):
 010d: "Hello, CP/M-86 from Open Watcom!\r\n$"
 ```
 
+## Building the toolchain
+
+Open Watcom does not need a full release build to compile CP/M-86 programs: the
+**bootstrap** cross-tools are enough. On this arm64 macOS host the toolchain was
+built with the CI bootstrap path (native `clang`):
+
+```
+export OWROOT=$(pwd) OWTOOLS=CLANG OWOBJDIR=binbuild OWBUILD_STAGE=boot
+. ./cmnvars.sh
+cd bld && sh $OWROOT/ci/buildx.sh          # builds wmake, builder, then `builder boot`
+```
+
+This populates `build/binbuild/` with the bootstrap cross-compilers/-assembler/
+-linker: `bwcc` (16-bit C), `bwasm` (assembler) and `bwlink` (linker). Put that
+directory on `PATH` and `build-cpm86.sh` uses those automatically (it prefers a
+released `wasm`/`wcc`/`wl` if present, else falls back to `bwasm`/`bwcc`/
+`bwlink`).
+
 ## What is still required
 
-1. **A built OW toolchain** — run the repo's `./build.sh` (after sourcing
-   `setvars.sh`) so `wcc`/`wl` are on `PATH`. Not attempted here (heavy build;
-   this host is arm64 macOS).
-2. **A CP/M-86 runtime** if you want the standard C library (stdio, malloc,
+1. **A CP/M-86 runtime** if you want the standard C library (stdio, malloc,
    `printf`). That means a CP/M-86 startup stub (`_cstart_`) plus a BDOS-based
    shim replacing clib's INT 21h calls. Freestanding code (own BDOS calls, as
    in `hello.c`) needs none of this and is the right first milestone.
-3. **Validation on real CP/M-86.** The `.CMD` runs under the included
+2. **Validation on real CP/M-86.** The `.CMD` runs under the included
    instruction-level emulators (see below); a full-machine emulator (86Box,
    PCem, or a CP/M-86 VM) is still the way to validate OS-loader specifics.
 
@@ -149,7 +165,7 @@ programs is BDOS coverage, not CPU emulation.
 | `hello.asm` | basic freestanding CP/M-86 hello-world (wasm, org 100h), raw BDOS (`INT 0E0h`) |
 | `hello.c` | same program in C via `#pragma aux`, for when a C runtime is added |
 | `echoarg.asm` | prints the command tail — demonstrates CCP base-page setup |
-| `HELLO.CMD` | ready-to-run executable (hand-assembled `hello.asm` + `bin2cmd`) |
+| `HELLO.CMD` | ready-to-run executable (built by `build-cpm86.sh hello.asm`; byte-identical to the earlier hand-assembled reference) |
 | `ECHOARG.CMD` | ready-to-run command-tail demo |
 | `build-cpm86.sh` | the wasm/wcc → wl → bin2cmd pipeline (`CPU=` selects 8086/80186/…) |
 | `cpm86run.py` | minimal hand-written 8086 interpreter + BDOS |
