@@ -66,12 +66,16 @@ case "$EXT" in
     c)
         # 16-bit x86 (-$CPU), small model (-ms; OW has no separate tiny model),
         # no stack checks (-s), intrinsics on (-oi), no default library refs
-        # (-zl). __watcall appends '_' to the entry symbol -> start__.
+        # (-zl). The C entry point is cpmmain(); a startup stub (cpmstart.asm),
+        # linked FIRST so it lands at the start of the code group, calls it and
+        # terminates -- `wl format raw` does not reorder _TEXT to put the entry
+        # symbol first, so the first linked object must be the entry.
         "$WCC" "-$CPU" -ms -s -oi -zl "$SRC" -fo="$STEM.obj"
+        "$WASM" "-$CPU" "$HERE/cpmstart.asm" -fo="$HERE/cpmstart.obj"
         "$WLINK" format raw bin \
-           option quiet, start=start__, offset=0x100 \
+           option quiet, offset=0x100 \
            name "$STEM.bin" \
-           file "$STEM.obj"
+           file "$HERE/cpmstart.obj" file "$STEM.obj"
         python3 "$HERE/bin2cmd.py" "$STEM.bin" "$CMD"
         ;;
     *)

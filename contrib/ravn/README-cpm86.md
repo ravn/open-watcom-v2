@@ -147,10 +147,40 @@ Two included runners execute the actual machine code at instruction level:
 
 Both print `Hello, CP/M-86 from Open Watcom!` for `HELLO.CMD`.
 
+### Non-trivial program: Dhrystone 2.1
+
+`dhry.c` is a faithful port of Reinhold Weicker's **Dhrystone 2.1** benchmark
+(structs, unions, enums, pointer chasing, record assignment, string handling
+and many cross-function calls) made freestanding for CP/M-86: `printf`/`scanf`
+are replaced by BDOS console output and a fixed run count, `malloc` by a static
+pool, and `strcpy`/`strcmp` are provided locally. Build and run it with the
+same pipeline:
+
+```
+export PATH=$OWROOT/build/binbuild:$PATH
+./build-cpm86.sh dhry.c
+python3 cpm86run_unicorn.py DHRY.CMD
+```
+
+It prints the benchmark's documented final values and every one matches its
+`should be:` line (`Int_Glob 5`, `Bool_Glob 1`, `Arr_2_Glob[8][7] == runs+10`,
+the record fields, the strings, …) — i.e. the 16-bit code the bootstrapped
+`wcc` generated executes **correctly**. Timing is intentionally omitted: an
+instruction-level emulator has no meaningful wall clock, so the benchmark is
+used here as a correctness stress test, not a MIPS figure.
+
+Because a C program has many functions and `wl format raw` does not reorder
+`_TEXT` to put the entry symbol first, the C path links a tiny startup stub
+(`cpmstart.asm`) **first**; its first byte is the entry point and it calls the
+C entry `cpmmain()`.
+
 **Scope — what "run a full program" needs:** Unicorn supplies the CPU; *we*
 supply the OS. `cpm86run_unicorn.py` implements the BDOS console/string group
 (functions 0, 1, 2, 5, 6, 9, 10, 11) and feeds console input via
-`run(path, stdin_bytes=...)`. Disk/file functions (open/close/read/write,
+`run(path, stdin_bytes=...)`. It loads the program into a single group with
+`CS = DS = ES = SS` and a full-segment stack (the CP/M-86 8080 model), which is
+required for real C code that passes the address of a stack local as a
+small-model *near* pointer. Disk/file functions (open/close/read/write,
 15/16/20/21/…) are **not** implemented yet and raise `BdosUnimplemented` so an
 unsupported program fails loudly. Note the instruction set (incl. 80186 via
 `CPU=1`) is fully covered by Unicorn/QEMU; the remaining work to test "full"
@@ -163,10 +193,13 @@ programs is BDOS coverage, not CPU emulation.
 | `bin2cmd.py` | raw 8086 image → CP/M-86 `.CMD` (8080 + small models, base page reserved), with tests |
 | `ccp.py` | emulate the CCP: parse the command line into FCBs + command tail and build the base page |
 | `hello.asm` | basic freestanding CP/M-86 hello-world (wasm, org 100h), raw BDOS (`INT 0E0h`) |
-| `hello.c` | same program in C via `#pragma aux`, for when a C runtime is added |
+| `hello.c` | same program in C via `#pragma aux`; entry `cpmmain()` |
 | `echoarg.asm` | prints the command tail — demonstrates CCP base-page setup |
+| `dhry.c` | freestanding CP/M-86 port of the Dhrystone 2.1 benchmark (non-trivial C demo) |
+| `cpmstart.asm` | minimal C startup stub (linked first) — calls `cpmmain()`, then BDOS terminate |
 | `HELLO.CMD` | ready-to-run executable (built by `build-cpm86.sh hello.asm`; byte-identical to the earlier hand-assembled reference) |
 | `ECHOARG.CMD` | ready-to-run command-tail demo |
+| `DHRY.CMD` | ready-to-run Dhrystone 2.1 benchmark (built by `build-cpm86.sh dhry.c`) |
 | `build-cpm86.sh` | the wasm/wcc → wl → bin2cmd pipeline (`CPU=` selects 8086/80186/…) |
 | `cpm86run.py` | minimal hand-written 8086 interpreter + BDOS |
 | `cpm86run_unicorn.py` | independent Unicorn/QEMU runner + BDOS console group |

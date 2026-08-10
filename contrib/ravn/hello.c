@@ -34,13 +34,13 @@ extern unsigned bdos( unsigned char func, unsigned dx );
 static char message[] = "Hello, CP/M-86 from Open Watcom!\r\n$";
 
 /*
- * Entry symbol. build-cpm86.sh links this at load offset 0100H (wl 'option
- * offset=0x100') and bin2cmd.py reserves the 100H base page, so CP/M-86's
- * 8080 model enters here at CS:0100H. __watcall appends '_' to the symbol,
- * so the linker sees this as 'start__'. In the small/8080 model CS=DS already
- * holds for wcc-generated code, so 'message' is reachable via DS:DX.
+ * C entry point. The cpmstart.asm startup stub (linked first by
+ * build-cpm86.sh) is what actually sits at CS:0100H; it calls this function
+ * (wcc __watcall name: cpmmain_) and terminates via BDOS when we return. In
+ * the small/8080 model CS=DS holds for wcc-generated code, so 'message' is
+ * reachable via DS:DX.
  */
-void start_( void )
+void cpmmain( void )
 {
     bdos( BDOS_WRITESTR, (unsigned)message );
     bdos( BDOS_TERMCPM, 0 );

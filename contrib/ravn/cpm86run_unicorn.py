@@ -36,7 +36,7 @@ LOAD_SEG = 0x1000      # paragraph where the first (code) group is placed
 CCP_SEG = 0x0800       # emulated CCP area: stack + a return stub below the program
 MEM_BASE = 0x0000
 MEM_SIZE = 0x100000    # 1 MB, must be page aligned for Unicorn
-MAX_INSNS = 5_000_000  # runaway guard
+MAX_INSNS = 200_000_000  # runaway guard (large enough for real benchmarks)
 
 
 class Done(Exception):
@@ -110,13 +110,18 @@ def _load(uc, data, cmdline):
     uc.reg_write(UC_X86_REG_DS, data_seg)
     uc.reg_write(UC_X86_REG_ES, data_seg)
 
-    # SS:SP live in the CCP, not the program. Provide a small stack and a
-    # far-return stub so a program that RETFs terminates cleanly via BDOS 0.
+    # SS:SP live in the CCP, not the program. The stack is placed in the
+    # program's *data* group so that SS == DS: a real C program (e.g. the
+    # Dhrystone benchmark) constantly takes the address of a stack local and
+    # passes it as a small-model *near* pointer, which the callee dereferences
+    # through DS -- so those pointers only resolve correctly when SS == DS.
+    # Give (almost) a full 64K segment of stack and a far-return stub in the
+    # CCP area so a program that RETFs also terminates cleanly via BDOS 0.
     uc.mem_write(CCP_SEG << 4, bytes([0xB1, 0x00, 0xCD, 0xE0]))  # mov cl,0; int E0h
-    uc.reg_write(UC_X86_REG_SS, CCP_SEG)
-    sp = 0x0100
+    uc.reg_write(UC_X86_REG_SS, data_seg)
+    sp = 0xFFFE
     ret_frame = bytes([0x00, 0x00, CCP_SEG & 0xFF, (CCP_SEG >> 8) & 0xFF])
-    uc.mem_write((CCP_SEG << 4) + sp - 4, ret_frame)            # [IP=0][CS=CCP]
+    uc.mem_write((data_seg << 4) + sp - 4, ret_frame)          # [IP=0][CS=CCP]
     uc.reg_write(UC_X86_REG_SP, sp - 4)
 
     uc.reg_write(UC_X86_REG_IP, entry_ip)
