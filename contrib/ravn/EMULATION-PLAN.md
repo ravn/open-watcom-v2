@@ -51,7 +51,7 @@ base page as code. This must be fixed (see Phase 0).
 | 0003H  | BC0..BC1 | code group base paragraph |
 | 0006H  | LD / BD  | data group last position + base |
 | ...    | LE/BE, LS/BS, LX/BX | extra, stack, aux group descriptors |
-| 0015H  | M80      | =1 when 8080 model in use |
+| 0005H  | M80      | =1 when 8080 model in use |
 | 005CH  | FCB 1    | default FCB parsed from command tail |
 | 006CH  | FCB 2    | second parsed filename |
 | 0080H  | DMA buf  | default 128-byte DMA buffer / command tail |
@@ -105,21 +105,22 @@ Grouping for implementation:
 
 ## Staged plan
 
-### Phase 0 — Faithful program load (correctness foundation)
+### Phase 0 — Faithful program load (correctness foundation) — **DONE**
 - Parse **all** group descriptors from the 128-byte header, classify the
   memory model (8080 / Small / Compact) per Table 2-1, and lay each group into
-  its own paragraph-aligned segment.
+  its own paragraph-aligned segment. *(8080 + Small implemented in
+  `cpm86run_unicorn.py._load`; Compact treated as Small for now.)*
 - Initialise segment registers and **entry IP per model** (8080→0100H,
-  Small/Compact→0000H). Set SS:SP to an emulated 96-byte CCP stack.
-- Build a correct **base page** (group length/base fields, M80 byte, DMA
-  default, parsed FCBs at 005CH/006CH, command tail at 0080H).
-- **Fix the build side:** make `bin2cmd.py` / `hello.asm` internally
-  consistent with the loader. Options: keep 8080 model but assemble with
-  `org 100h` and entry at 0100H (true CP/M-80-style), *or* emit a Small-model
-  `.CMD` (separate code+data) with entry 0000H. Regenerate `HELLO.CMD` and
-  re-verify byte layout.
-- Update both runners + `README-cpm86.md`; the earlier "entry at CS:0000 for
-  all models" note is wrong and must be corrected.
+  Small→0000H). Set SS:SP to an emulated 96-byte CCP stack with a far-return
+  stub that terminates via BDOS 0. *(done)*
+- Build a correct **base page** (group length/base fields, M80 byte at 05H, DMA
+  default, parsed FCBs at 005CH/006CH, command tail at 0080H) — implemented in
+  `ccp.py` and populated at load time from the command line. *(done)*
+- **Build side reconciled:** `bin2cmd.py` reserves the 100H-byte base page
+  (`--no-basepage` opts out); `hello.asm`/`echoarg.asm` assemble at `org 100h`;
+  `HELLO.CMD`/`ECHOARG.CMD` regenerated and verified.
+- README corrected: the earlier "entry at CS:0000 for all models" note was
+  wrong; only Small/Compact enter at 0000H.
 
 ### Phase 1 — Complete the console/character BDOS + BIOS char group
 - Finish BDOS 3,4,7,8,12 and make 1/2/6/9/10/11 spec-exact (e.g. fn 6 special

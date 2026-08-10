@@ -267,28 +267,42 @@ class CPU:
             pass
 
 
-def load_cmd(path, cpu, load_seg=0x1000):
+def load_cmd(path, cpu, load_seg=0x1000, cmdline=None):
+    import os as _os
+    import ccp
+    import bin2cmd
     data = open(path, "rb").read()
     if len(data) < 128 or not (1 <= data[0] <= 9):
         raise ValueError("not a CP/M-86 .CMD file")
-    # first Code group (type 1)
+    if cmdline is None:
+        cmdline = _os.path.splitext(_os.path.basename(path))[0].upper()
+    groups = bin2cmd.parse_header(data)
     body = data[128:]
-    # 8080 model: single group at offset 0; CS=DS=ES=SS=load_seg, entry CS:0000
+    # This interpreter supports the 8080 model (single code group): the loader
+    # reserves the base page (0..0FFH) and enters at CS:0100H.
+    code_len = groups[0][1] * 16 if groups else len(body)
     base = cpu.lin(load_seg, 0)
     cpu.mem[base:base + len(body)] = body
+    fcb1, fcb2, tail = ccp.fcbs_and_tail_from_cmdline(cmdline)
+    bp = ccp.build_base_page(model="8080", code_seg=load_seg, code_len=code_len,
+                             fcb1=fcb1, fcb2=fcb2, tail=tail)
+    cpu.mem[base:base + len(bp)] = bp
     for sreg in ("cs", "ds", "es", "ss"):
         cpu.s[sreg] = load_seg
-    cpu.ip = 0
+    cpu.ip = ccp.BASE_PAGE_SIZE  # 0x100
     cpu.r["sp"] = 0xFFFE
 
 
 def main(argv=None):
+    import os as _os
     argv = argv or sys.argv[1:]
     if not argv:
-        print("usage: cpm86run.py FILE.CMD", file=sys.stderr)
+        print("usage: cpm86run.py FILE.CMD [ARG ...]", file=sys.stderr)
         return 2
     cpu = CPU()
-    load_cmd(argv[0], cpu)
+    prog = _os.path.splitext(_os.path.basename(argv[0]))[0].upper()
+    cmdline = " ".join([prog] + list(argv[1:]))
+    load_cmd(argv[0], cpu, cmdline=cmdline)
     cpu.run()
     sys.stdout.write(cpu.out.decode("cp437", errors="replace"))
     sys.stdout.flush()

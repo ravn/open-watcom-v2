@@ -11,9 +11,11 @@
 ;       9  C_WRITESTR  print '$'-terminated string at DS:DX
 ;       0  P_TERMCPM   terminate, return to CCP
 ;
-;   CP/M-86 8080 model: the loader jumps to CS:0000 with the code group as the
-;   single segment. We force DS = CS at entry so 'msg' (which lives in the same
-;   group) is addressable regardless of how the loader set DS / the base page.
+;   CP/M-86 8080 model: the loader reserves the first 100H bytes of the code
+;   group for the base page (FCBs, command tail, group descriptors) and jumps
+;   to CS:0100H. Code is therefore assembled at 'org 100h'. We force DS = CS at
+;   entry so 'msg' (which lives in the same group) is addressable regardless of
+;   how the loader set DS.
 ;
 ;   Build:  wasm hello.asm
 ;           wl format raw bin option start=start_ name hello.bin file hello.obj
@@ -25,7 +27,7 @@
 _TEXT   segment byte public 'CODE'
         assume  cs:_TEXT, ds:_TEXT, ss:_TEXT
 
-        org     0                       ; entry must be at offset 0 (CS:0000)
+        org     100h                    ; base page occupies 0..0FFH; entry at CS:0100H
 start_:
         push    cs
         pop     ds                      ; DS = CS -> 'msg' addressable

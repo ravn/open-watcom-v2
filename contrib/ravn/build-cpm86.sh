@@ -45,14 +45,16 @@ case "$EXT" in
         ;;
 esac
 
-# 2. Link to a flat binary image. The entry symbol (start_) must sit at
-#    offset 0 of the image, because CP/M-86 jumps to CS:0000.
+# 2. Link to a flat binary image. Code is assembled at org 100h (after the
+#    100H-byte base page); for the 8080 model CP/M-86 enters at CS:0100H.
 wl format raw bin \
    option quiet, start=start_ \
    name "$STEM.bin" \
    file "$STEM.obj"
 
-# 3. Prepend the CP/M-86 .CMD header (8080 / single-group model).
+# 3. Prepend the CP/M-86 .CMD header and reserve the 100H-byte base page
+#    (8080 / single-group model). If wl already emits the 100H org padding in
+#    the raw image, add --no-basepage here to avoid reserving it twice.
 python3 "$HERE/bin2cmd.py" "$STEM.bin" "$CMD"
 
 echo "Built $CMD"

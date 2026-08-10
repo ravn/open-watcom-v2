@@ -30,6 +30,7 @@ import sys
 
 HEADER_SIZE = 128
 PARA = 16  # bytes per paragraph (16-byte segment granularity)
+BASE_PAGE_SIZE = 0x100  # CP/M-86 reserves 100H bytes for the base page
 
 # Group descriptor types
 G_CODE = 0x01
@@ -119,19 +120,33 @@ def parse_header(data: bytes):
 
 
 def convert(in_path: str, out_path: str, max_paras: int,
-            model: str = "8080", data_path: str = None) -> None:
+            model: str = "8080", data_path: str = None,
+            reserve_basepage: bool = True) -> None:
+    """Wrap a raw image in a .CMD header.
+
+    When reserve_basepage is true (the CP/M-86 default), a 100H-byte base page
+    region is placed at offset 0 of the group the program runs from -- the code
+    group in the 8080 model, the data group in the small model -- so the loader
+    can fill in FCBs, the command tail, and group descriptors there. The raw
+    code image is therefore assumed to be assembled at org 100H for the 8080
+    model (execution begins at CS:0100H), matching the System Guide's 8080
+    memory-model transient-program layout (Section 2.3).
+    """
     with open(in_path, "rb") as f:
         image = f.read()
+    pad = b"\x00" * BASE_PAGE_SIZE if reserve_basepage else b""
     if model == "small":
         data = b""
         if data_path:
             with open(data_path, "rb") as f:
                 data = f.read()
-        header = build_header_small(len(image), len(data), max_paras)
-        payload = image + data
+        data_image = pad + data          # base page lives at DS:0000
+        header = build_header_small(len(image), len(data_image), max_paras)
+        payload = image + data_image
     else:
-        header = build_header_8080(len(image), max_paras)
-        payload = image
+        code_image = pad + image         # base page at CS:0000, code at CS:0100
+        header = build_header_8080(len(code_image), max_paras)
+        payload = code_image
     with open(out_path, "wb") as f:
         f.write(header)
         f.write(payload)
@@ -147,9 +162,13 @@ def main(argv=None) -> int:
                     help="raw data image for the small model's Data group (optional)")
     ap.add_argument("--max-paras", type=lambda x: int(x, 0), default=0x0FFF,
                     help="max allocation in 16-byte paragraphs (default 0x0FFF)")
+    ap.add_argument("--no-basepage", dest="basepage", action="store_false",
+                    help="do not reserve the 100H-byte base page (raw org-0 image)")
+    ap.set_defaults(basepage=True)
     args = ap.parse_args(argv)
     try:
-        convert(args.input, args.output, args.max_paras, args.model, args.data_path)
+        convert(args.input, args.output, args.max_paras, args.model,
+                args.data_path, args.basepage)
     except (OSError, ValueError) as e:
         print(f"bin2cmd: error: {e}", file=sys.stderr)
         return 1

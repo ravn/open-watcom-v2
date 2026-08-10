@@ -54,29 +54,57 @@ With no C runtime, the program calls **BDOS directly via `INT 0E0h`**
 (`CL`=function, `DX`=parameter). Functions used: 9 (print `$`-terminated
 string at `DS:DX`) and 0 (terminate).
 
-**Entry & segment convention (verified against the DR System Guide):** in the
-8080 model the loader jumps to **`CS:0000`** (unlike CP/M-80's `.COM`, which
-starts at `0100h`), with the code group as the single segment. The base page
-lives at `DS:0000`. The entry code therefore **forces `DS = CS`**
-(`push cs` / `pop ds`) so the `$`-string — which lives in the same group — is
-addressable no matter how the loader set `DS`.
+**Entry & segment convention (per the DR System Guide, Section 2.3–2.5).** The
+loader picks the memory model from the `.CMD` group descriptors and initialises
+the segment registers and entry `IP` accordingly:
 
-- `hello.asm` (wasm) is the recommended starting point: entry is guaranteed at
-  offset 0 (`org 0`), no toolchain layout assumptions.
+| Model | Groups | CS/DS/ES | Entry IP |
+|-------|--------|----------|----------|
+| 8080  | code only | CS=DS=ES=code base | **`0100H`** |
+| Small | code + data | CS=code, DS=ES=data | `0000H` |
+
+In the **8080 model** the first `100H` bytes of the (shared) code group are the
+**base page**, and execution begins at **`CS:0100H`** — exactly like CP/M-80's
+`.COM`. (An earlier version of this note incorrectly said `CS:0000`; only the
+Small/Compact models enter at offset 0.) The base page lives at `DS:0000`. The
+entry code **forces `DS = CS`** (`push cs` / `pop ds`) so the `$`-string, which
+lives in the same group, is addressable regardless of how the loader set `DS`.
+
+- `hello.asm` (wasm) is the recommended starting point: code is assembled at
+  `org 100h` (after the base page) and the loader enters there.
 - `hello.c` shows the same thing in C via a `#pragma aux` BDOS call, for once a
   C runtime is added later.
+
+### Command line, FCB and base page setup
+
+Before entering a program the emulated CCP (`ccp.py`) populates the base page
+from the typed command line, just like real CP/M-86 (System Guide 2.6/2.7):
+
+- the two filename arguments are parsed into the **default FCBs** at `DS:005CH`
+  and `DS:006CH` (drive code, 8.3 name, wildcards);
+- the **command tail** is stored at `DS:0080H` (length byte + upper-cased
+  characters), which is also the default DMA buffer;
+- the group length/base descriptors and the `M80` flag (offset `05H`) are
+  filled in from the header.
+
+`ECHOARG.CMD` demonstrates this — it prints the command tail the CCP left at
+`0080H`:
+
+```
+python3 cpm86run_unicorn.py ECHOARG.CMD one two.dat   ->   " ONE TWO.DAT"
+```
 
 ### Ready-to-run artifact: `HELLO.CMD`
 
 `HELLO.CMD` in this folder is a **complete, runnable** CP/M-86 executable built
-by hand-assembling `hello.asm` and wrapping it with `bin2cmd.py` — so you can
-test the pipeline in an emulator before building the OW toolchain. Layout:
+by hand-assembling `hello.asm` (org 100h) and wrapping it with `bin2cmd.py`
+(which reserves the `100H`-byte base page) — so you can test the pipeline in an
+emulator before building the OW toolchain. Code layout (after the base page):
 
 ```
-0000: 01 03 00 00 00 03 00 ff 0f ...   ; Code group, 3 paragraphs, relocatable
-0080: 0e 1f ba 0d 00 b1 09 cd e0       ; push cs; pop ds; mov dx,msg; mov cl,9; int E0h
+0100: 0e 1f ba 0d 01 b1 09 cd e0       ; push cs; pop ds; mov dx,msg; mov cl,9; int E0h
       b1 00 cd e0                       ; mov cl,0; int E0h
-      "Hello, CP/M-86 from Open Watcom!\r\n$"
+010d: "Hello, CP/M-86 from Open Watcom!\r\n$"
 ```
 
 ## What is still required
@@ -116,10 +144,13 @@ programs is BDOS coverage, not CPU emulation.
 
 | File | Purpose |
 |------|---------|
-| `bin2cmd.py` | raw 8086 image → CP/M-86 `.CMD` (8080 + small models), with tests |
-| `hello.asm` | basic freestanding CP/M-86 hello-world (wasm), raw BDOS (`INT 0E0h`) |
+| `bin2cmd.py` | raw 8086 image → CP/M-86 `.CMD` (8080 + small models, base page reserved), with tests |
+| `ccp.py` | emulate the CCP: parse the command line into FCBs + command tail and build the base page |
+| `hello.asm` | basic freestanding CP/M-86 hello-world (wasm, org 100h), raw BDOS (`INT 0E0h`) |
 | `hello.c` | same program in C via `#pragma aux`, for when a C runtime is added |
+| `echoarg.asm` | prints the command tail — demonstrates CCP base-page setup |
 | `HELLO.CMD` | ready-to-run executable (hand-assembled `hello.asm` + `bin2cmd`) |
+| `ECHOARG.CMD` | ready-to-run command-tail demo |
 | `build-cpm86.sh` | the wasm/wcc → wl → bin2cmd pipeline (`CPU=` selects 8086/80186/…) |
 | `cpm86run.py` | minimal hand-written 8086 interpreter + BDOS |
 | `cpm86run_unicorn.py` | independent Unicorn/QEMU runner + BDOS console group |

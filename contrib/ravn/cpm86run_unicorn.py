@@ -13,10 +13,14 @@ program makes. The console/string group is implemented; disk/file functions are
 not yet (they raise a clear "unimplemented BDOS function" error so unsupported
 programs fail loudly instead of silently).
 
-Load model: CP/M-86 8080 -> single Code group at offset 0 of a segment, with
-CS=DS=ES=SS=LOAD_SEG, SP at top, execution beginning at CS:0000.
+Program load emulates the CCP: the memory model (8080 / small) is read from the
+.CMD group descriptors, groups are placed in memory, segment registers and the
+entry IP are set per the System Guide (8080 -> CS:0100H, small -> CS:0000H),
+and the base page (group descriptors, default FCBs at 005CH/006CH, command tail
+at 0080H) is populated from the command line via the ccp module.
 """
 
+import os
 import sys
 from unicorn import (Uc, UC_ARCH_X86, UC_MODE_16, UC_HOOK_INTR)
 from unicorn.x86_const import (
@@ -25,9 +29,14 @@ from unicorn.x86_const import (
     UC_X86_REG_AX,
 )
 
-LOAD_SEG = 0x1000
+import bin2cmd
+import ccp
+
+LOAD_SEG = 0x1000      # paragraph where the first (code) group is placed
+CCP_SEG = 0x0800       # emulated CCP area: stack + a return stub below the program
 MEM_BASE = 0x0000
-MEM_SIZE = 0x100000  # 1 MB, must be page aligned for Unicorn
+MEM_SIZE = 0x100000    # 1 MB, must be page aligned for Unicorn
+MAX_INSNS = 5_000_000  # runaway guard
 
 
 class Done(Exception):
@@ -41,27 +50,98 @@ class BdosUnimplemented(Exception):
         self.func = func
 
 
-def run(path, stdin_bytes=b""):
+def _detect_model(groups):
+    types = [g[0] for g in groups]
+    if types == [bin2cmd.G_CODE]:
+        return "8080"
+    if sorted(types) == [bin2cmd.G_CODE, bin2cmd.G_DATA]:
+        return "small"
+    return "compact"
+
+
+def _load(uc, data, cmdline):
+    """Load a .CMD image into `uc` and set up registers + base page like the
+    CCP. Returns (cs, ip). Raises ValueError on a malformed file."""
+    if len(data) < 128 or not (1 <= data[0] <= 9):
+        raise ValueError("not a CP/M-86 .CMD file")
+    groups = bin2cmd.parse_header(data)
+    if not groups:
+        raise ValueError(".CMD header has no group descriptors")
+    model = _detect_model(groups)
+    body = data[128:]
+
+    # Slice the body into per-group images, in header order.
+    images, off = {}, 0
+    order = []
+    for (gtype, length, base, minp, maxp) in groups:
+        nbytes = length * 16
+        images[gtype] = body[off:off + nbytes]
+        order.append(gtype)
+        off += nbytes
+
+    code_img = images.get(bin2cmd.G_CODE, b"")
+    data_img = images.get(bin2cmd.G_DATA, b"")
+    code_len = len(code_img)
+
+    code_seg = LOAD_SEG
+    uc.mem_write(code_seg << 4, code_img)
+
+    if model == "8080":
+        data_seg = code_seg
+        data_len = code_len
+        entry_ip = ccp.BASE_PAGE_SIZE            # 0x100: skip the base page
+    else:
+        code_paras = (code_len + 15) // 16
+        data_seg = code_seg + max(code_paras, 1)
+        uc.mem_write(data_seg << 4, data_img)
+        data_len = len(data_img)
+        entry_ip = 0x0000                        # small/compact enter at CS:0000
+
+    # Build the base page from the command line and write it into the data
+    # segment (which equals the code segment in the 8080 model).
+    fcb1, fcb2, tail = ccp.fcbs_and_tail_from_cmdline(cmdline)
+    bp = ccp.build_base_page(model=model, code_seg=code_seg, code_len=code_len,
+                             data_seg=data_seg, data_len=data_len,
+                             fcb1=fcb1, fcb2=fcb2, tail=tail)
+    uc.mem_write(data_seg << 4, bytes(bp))
+
+    # Segment registers per memory model (System Guide Section 2.3-2.5).
+    uc.reg_write(UC_X86_REG_CS, code_seg)
+    uc.reg_write(UC_X86_REG_DS, data_seg)
+    uc.reg_write(UC_X86_REG_ES, data_seg)
+
+    # SS:SP live in the CCP, not the program. Provide a small stack and a
+    # far-return stub so a program that RETFs terminates cleanly via BDOS 0.
+    uc.mem_write(CCP_SEG << 4, bytes([0xB1, 0x00, 0xCD, 0xE0]))  # mov cl,0; int E0h
+    uc.reg_write(UC_X86_REG_SS, CCP_SEG)
+    sp = 0x0100
+    ret_frame = bytes([0x00, 0x00, CCP_SEG & 0xFF, (CCP_SEG >> 8) & 0xFF])
+    uc.mem_write((CCP_SEG << 4) + sp - 4, ret_frame)            # [IP=0][CS=CCP]
+    uc.reg_write(UC_X86_REG_SP, sp - 4)
+
+    uc.reg_write(UC_X86_REG_IP, entry_ip)
+    return code_seg, entry_ip
+
+
+def run(path, cmdline=None, stdin_bytes=b""):
     """Load and run a .CMD file. Returns the captured console output (str).
+
+    cmdline is the command line as an operator would type it, e.g.
+    "ECHOARG A.TXT B.DAT"; its two filename arguments populate the default FCBs
+    at DS:005CH / DS:006CH and its tail is placed at DS:0080H, exactly as the
+    CCP does. If omitted, the program's own file name is used as the command
+    with no arguments.
 
     stdin_bytes feeds console-input BDOS calls (functions 1/6/10); when it runs
     out, input calls return 0 / empty.
     """
     data = open(path, "rb").read()
-    if len(data) < 128 or not (1 <= data[0] <= 9):
-        raise ValueError("not a CP/M-86 .CMD file")
-    body = data[128:]
+    if cmdline is None:
+        cmdline = os.path.splitext(os.path.basename(path))[0].upper()
 
     uc = Uc(UC_ARCH_X86, UC_MODE_16)
     uc.mem_map(MEM_BASE, MEM_SIZE)
-
-    base = LOAD_SEG << 4
-    uc.mem_write(base, body)
-
-    for reg in (UC_X86_REG_CS, UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_SS):
-        uc.reg_write(reg, LOAD_SEG)
-    uc.reg_write(UC_X86_REG_SP, 0xFFFE)
-    uc.reg_write(UC_X86_REG_IP, 0x0000)
+    cs, ip = _load(uc, data, cmdline)
 
     out = bytearray()
     inp = bytearray(stdin_bytes)
@@ -128,7 +208,7 @@ def run(path, stdin_bytes=b""):
     uc.hook_add(UC_HOOK_INTR, hook_intr)
 
     try:
-        uc.emu_start(base + 0x0000, base + len(body))
+        uc.emu_start((cs << 4) + ip, 0, count=MAX_INSNS)
     except Exception:
         pass
     if state.get("error"):
@@ -139,10 +219,13 @@ def run(path, stdin_bytes=b""):
 def main(argv=None):
     argv = argv or sys.argv[1:]
     if not argv:
-        print("usage: cpm86run_unicorn.py FILE.CMD", file=sys.stderr)
+        print("usage: cpm86run_unicorn.py FILE.CMD [ARG ...]", file=sys.stderr)
         return 2
+    path = argv[0]
+    prog = os.path.splitext(os.path.basename(path))[0].upper()
+    cmdline = " ".join([prog] + list(argv[1:]))
     try:
-        sys.stdout.write(run(argv[0]))
+        sys.stdout.write(run(path, cmdline=cmdline))
         sys.stdout.flush()
     except BdosUnimplemented as e:
         print(f"\ncpm86run_unicorn: {e}", file=sys.stderr)
