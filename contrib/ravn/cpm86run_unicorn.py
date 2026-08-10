@@ -22,7 +22,7 @@ at 0080H) is populated from the command line via the ccp module.
 
 import os
 import sys
-from unicorn import (Uc, UC_ARCH_X86, UC_MODE_16, UC_HOOK_INTR)
+from unicorn import (Uc, UC_ARCH_X86, UC_MODE_16, UC_HOOK_INTR, UC_HOOK_CODE)
 from unicorn.x86_const import (
     UC_X86_REG_CS, UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_SS,
     UC_X86_REG_SP, UC_X86_REG_IP, UC_X86_REG_CX, UC_X86_REG_DX,
@@ -128,7 +128,7 @@ def _load(uc, data, cmdline):
     return code_seg, entry_ip
 
 
-def run(path, cmdline=None, stdin_bytes=b""):
+def run(path, cmdline=None, stdin_bytes=b"", count_insns=False):
     """Load and run a .CMD file. Returns the captured console output (str).
 
     cmdline is the command line as an operator would type it, e.g.
@@ -139,6 +139,11 @@ def run(path, cmdline=None, stdin_bytes=b""):
 
     stdin_bytes feeds console-input BDOS calls (functions 1/6/10); when it runs
     out, input calls return 0 / empty.
+
+    When count_insns is true, every executed instruction is counted and the
+    total is returned as a second element (out, n_instructions); the tally is
+    deterministic (host-independent) and is useful as a size/work metric since
+    the emulator models no real cycle timing.
     """
     data = open(path, "rb").read()
     if cmdline is None:
@@ -212,26 +217,47 @@ def run(path, cmdline=None, stdin_bytes=b""):
 
     uc.hook_add(UC_HOOK_INTR, hook_intr)
 
+    insns = {"n": 0}
+    if count_insns:
+        def hook_code(uc, address, size, user_data):
+            insns["n"] += 1
+        uc.hook_add(UC_HOOK_CODE, hook_code)
+
     try:
         uc.emu_start((cs << 4) + ip, 0, count=MAX_INSNS)
     except Exception:
         pass
     if state.get("error"):
         raise state["error"]
-    return out.decode("cp437", errors="replace")
+    text = out.decode("cp437", errors="replace")
+    if count_insns:
+        return text, insns["n"]
+    return text
 
 
 def main(argv=None):
     argv = argv or sys.argv[1:]
+    count_insns = False
+    if argv and argv[0] in ("--count", "-c"):
+        count_insns = True
+        argv = argv[1:]
     if not argv:
-        print("usage: cpm86run_unicorn.py FILE.CMD [ARG ...]", file=sys.stderr)
+        print("usage: cpm86run_unicorn.py [--count] FILE.CMD [ARG ...]",
+              file=sys.stderr)
         return 2
     path = argv[0]
     prog = os.path.splitext(os.path.basename(path))[0].upper()
     cmdline = " ".join([prog] + list(argv[1:]))
     try:
-        sys.stdout.write(run(path, cmdline=cmdline))
-        sys.stdout.flush()
+        result = run(path, cmdline=cmdline, count_insns=count_insns)
+        if count_insns:
+            text, n = result
+            sys.stdout.write(text)
+            sys.stdout.flush()
+            print(f"\n[{n} instructions executed]", file=sys.stderr)
+        else:
+            sys.stdout.write(result)
+            sys.stdout.flush()
     except BdosUnimplemented as e:
         print(f"\ncpm86run_unicorn: {e}", file=sys.stderr)
         return 3

@@ -169,6 +169,22 @@ the record fields, the strings, …) — i.e. the 16-bit code the bootstrapped
 instruction-level emulator has no meaningful wall clock, so the benchmark is
 used here as a correctness stress test, not a MIPS figure.
 
+If you do want a *host-independent* work metric, pass `--count` to the runner
+and it reports the exact number of instructions executed:
+
+```
+python3 cpm86run_unicorn.py --count DHRY.CMD
+    ...
+    [14946252 instructions executed]     # ~747 instructions per Dhrystone run
+```
+
+That tally is deterministic (it depends only on the generated code and the
+emulator, not on the host). It is *not* a Dhrystones/second score — deriving
+one would require multiplying by 8086 cycle counts (≈15–30 cyc/insn), which for
+14.9M instructions over 20000 runs works out to roughly 300–500 Dhrystones/sec
+on a 5–8 MHz 8086, in line with period measurements. Those are estimates; only
+the instruction count is actually measured.
+
 Because a C program has many functions and `wl format raw` does not reorder
 `_TEXT` to put the entry symbol first, the C path links a tiny startup stub
 (`cpmstart.asm`) **first**; its first byte is the entry point and it calls the
