@@ -1,0 +1,4 @@
+# HELLO.CMD is a binary CP/M-86 executable, not a DOS .cmd batch script.
+# Prevent the repo-wide "*.cmd text" rule from mangling its line endings.
+HELLO.CMD binary
+*.CMD binary

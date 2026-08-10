@@ -1,0 +1,52 @@
+#!/bin/sh
+# ---------------------------------------------------------------------------
+# build-cpm86.sh - build a freestanding CP/M-86 .CMD program with Open Watcom
+#
+# Open Watcom cannot emit CP/M-86 .CMD files natively (its linker only knows
+# DOS .EXE/.COM, OS/2, Windows, ELF, Phar Lap, QNX, RDOS and raw binary -- see
+# bld/wl/h/_formats.h). We therefore:
+#
+#   1. assemble/compile 16-bit x86 (no runtime)
+#   2. link to a flat raw binary with wl (format raw)
+#   3. wrap the raw image in a 128-byte CP/M-86 .CMD header with bin2cmd.py
+#
+# Requires a built Open Watcom toolchain on PATH (wasm/wcc, wl) -- i.e. run the
+# top-level ./build.sh first and source setvars.sh. Validate the resulting
+# .CMD in a CP/M-86 emulator (86Box, PCem, ...).
+#
+# Usage: ./build-cpm86.sh hello.asm      (or hello.c)
+# ---------------------------------------------------------------------------
+set -e
+
+SRC=${1:-hello.asm}
+STEM=$(basename "$SRC" | sed 's/\.[^.]*$//')
+EXT=$(echo "$SRC" | sed 's/.*\.//')
+HERE=$(cd "$(dirname "$0")" && pwd)
+CMD=$(echo "$STEM" | tr '[:lower:]' '[:upper:]').CMD
+
+# 1. Assemble or compile to an OMF object.
+case "$EXT" in
+    asm)
+        wasm -0 "$SRC" -fo="$STEM.obj"
+        ;;
+    c)
+        # 16-bit x86 (-0), tiny model (-mt), no stack checks (-s).
+        wcc -0 -mt -s -oi -zl "$SRC" -fo="$STEM.obj"
+        ;;
+    *)
+        echo "build-cpm86.sh: unknown source type: .$EXT" >&2
+        exit 1
+        ;;
+esac
+
+# 2. Link to a flat binary image. The entry symbol (start_) must sit at
+#    offset 0 of the image, because CP/M-86 jumps to CS:0000.
+wl format raw bin \
+   option quiet, start=start_ \
+   name "$STEM.bin" \
+   file "$STEM.obj"
+
+# 3. Prepend the CP/M-86 .CMD header (8080 / single-group model).
+python3 "$HERE/bin2cmd.py" "$STEM.bin" "$CMD"
+
+echo "Built $CMD"
