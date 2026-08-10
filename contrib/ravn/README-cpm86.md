@@ -236,6 +236,52 @@ unsupported program fails loudly. Note the instruction set (incl. 80186 via
 `CPU=1`) is fully covered by Unicorn/QEMU; the remaining work to test "full"
 programs is BDOS coverage, not CPU emulation.
 
+## Running under a real CP/M-86 (full-machine emulators)
+
+The bundled `cpm86run_unicorn.py` is an *instruction-level* harness: great for
+fast, deterministic tests, but it has no real OS, no disk and no clock. To run
+the programs under a **genuine Digital Research CP/M-86**, use a full-machine
+emulator and boot a real CP/M-86 disk. This works because our programs use the
+real CP/M-86 ABI — they call the BDOS through `INT 0E0h` (software interrupt
+224) with the standard function numbers — so the console demos run unmodified.
+
+Recommended emulators (in order):
+
+1. **86Box** — the most hardware-accurate, actively maintained PC emulator
+   (8086/8088/80186/80286…), with native macOS/arm64 builds. Emulates a real
+   IBM PC/XT/AT; boot DR CP/M-86 and mount an image built below.
+2. **QEMU** (`qemu-system-i386`) — lighter and scriptable, good for CI/
+   automation; boots a CP/M-86-for-the-IBM-PC image on emulated PC hardware.
+3. **MAME** — cycle-accurate IBM PC 5150 (real 8088 timing). Heavier, but the
+   only option that yields a *real* Dhrystones/sec figure (see the timing note
+   above) since it models true 8086 cycle timing.
+
+Getting the OS: Digital Research CP/M-86 is now freely redistributable and its
+IBM-PC disk images are available from the CP/M preservation sites
+(e.g. `www.cpm.z80.de`).
+
+Transferring the `.CMD` files onto a CP/M-86 disk image is automated with
+`mkdisk-cpm86.sh` (needs [cpmtools](http://www.moria.de/~michael/cpmtools/):
+`brew install cpmtools` / `apt-get install cpmtools`):
+
+```
+./mkdisk-cpm86.sh cpm86.img          # packs every *.CMD into an IBM CP/M-86 image
+    Wrote cpm86.img (ibmpc-514ds):
+    0:
+    bigdata.cmd  dhry.cmd  echoarg.cmd  hello.cmd
+```
+
+Then mount `cpm86.img` as a drive in the emulator and run e.g. `HELLO` or
+`DHRY`. The `.CMD` files round-trip through the image byte-identically.
+
+**Portability caveat:** `HELLO`, `ECHOARG` and `DHRY` use only standard BDOS
+console calls and run unmodified on real CP/M-86. `BIGDATA` addresses a
+*hard-coded* far segment (`0x3000`) that it does not own — fine under the bare
+bundled emulator, but on a real CP/M-86 a program must obtain memory legally
+(Concurrent CP/M-86 memory calls 55–58, or the free-memory info in the base
+page) before using segments outside its load image. So treat `BIGDATA` as an
+emulator demo, not a portable CP/M-86 program.
+
 ## Files in this proof-of-concept
 
 | File | Purpose |
@@ -253,6 +299,7 @@ programs is BDOS coverage, not CPU emulation.
 | `DHRY.CMD` | ready-to-run Dhrystone 2.1 benchmark (built by `build-cpm86.sh dhry.c`) |
 | `BIGDATA.CMD` | ready-to-run >64 KB data-structure checksum demo (built by `build-cpm86.sh bigdata.c`) |
 | `build-cpm86.sh` | the wasm/wcc → wl → bin2cmd pipeline (`CPU=` selects 8086/80186/…) |
+| `mkdisk-cpm86.sh` | pack the `.CMD` files into a CP/M-86 disk image (cpmtools) for full-machine emulators |
 | `cpm86run.py` | minimal hand-written 8086 interpreter + BDOS |
 | `cpm86run_unicorn.py` | independent Unicorn/QEMU runner + BDOS console group |
 | `CPM-86_Programmers_Guide_Jan83.pdf` | Digital Research reference manual (BDOS calls, `.CMD` format, base page) |
