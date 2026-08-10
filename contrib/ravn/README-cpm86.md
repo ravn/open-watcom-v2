@@ -190,6 +190,40 @@ Because a C program has many functions and `wl format raw` does not reorder
 (`cpmstart.asm`) **first**; its first byte is the entry point and it calls the
 C entry `cpmmain()`.
 
+### Large program with more than 64 KB of data: `bigdata.c`
+
+`bigdata.c` is a bigger program (a PRNG, a table-driven CRC-32, three more
+checksum routines, record generation, a cross-segment ring traversal and
+hex/decimal printers) that builds and checksums a **data structure larger than
+64 KB**. The program image itself stays inside one ≤64 KB CP/M-86 group, but
+the data structure — 3072 records × 64 bytes = **192 KB**, three 64 KB
+segments — lives *above* the program in the 1 MB real-mode address space and is
+reached through explicit `__far` pointers. This is exactly how CP/M-86 lets a
+program use far more than 64 KB of data: the program manages its own segment
+registers (here via far pointers) to address the whole memory space (System
+Guide §2.5). No linker/model change is needed — small model plus `__far` is
+enough, and the emulator already maps the full 1 MB and does real segment
+arithmetic.
+
+```
+./build-cpm86.sh bigdata.c
+python3 cpm86run_unicorn.py BIGDATA.CMD
+    ...
+    sum32      = 01730B21
+    crc32      = 2CA68199
+    fletcher   = C3BF0B21
+    ring-walk  = 0047FA00
+    expected   = 0047FA00  [MATCH]
+```
+
+Everything is deterministic (fixed PRNG seed) and independently verified: the
+`crc32` value matches Python's `binascii.crc32` over the same 192 KB, and the
+`ring-walk` — which follows a `next` index that jumps across all three segments
+in a single Hamiltonian ring — equals `N*(N-1)/2`, proving non-sequential far
+pointer chasing across segment boundaries works. To avoid pulling in C runtime
+helpers (this is a `-zl` freestanding image) the code uses only 16-bit
+multiply/divide and 32-bit add/shift/xor — no 32-bit `mul`/`div`.
+
 **Scope — what "run a full program" needs:** Unicorn supplies the CPU; *we*
 supply the OS. `cpm86run_unicorn.py` implements the BDOS console/string group
 (functions 0, 1, 2, 5, 6, 9, 10, 11) and feeds console input via
@@ -212,10 +246,12 @@ programs is BDOS coverage, not CPU emulation.
 | `hello.c` | same program in C via `#pragma aux`; entry `cpmmain()` |
 | `echoarg.asm` | prints the command tail — demonstrates CCP base-page setup |
 | `dhry.c` | freestanding CP/M-86 port of the Dhrystone 2.1 benchmark (non-trivial C demo) |
+| `bigdata.c` | large program using `__far` pointers to build and checksum a >64 KB (192 KB) data structure |
 | `cpmstart.asm` | minimal C startup stub (linked first) — calls `cpmmain()`, then BDOS terminate |
 | `HELLO.CMD` | ready-to-run executable (built by `build-cpm86.sh hello.asm`; byte-identical to the earlier hand-assembled reference) |
 | `ECHOARG.CMD` | ready-to-run command-tail demo |
 | `DHRY.CMD` | ready-to-run Dhrystone 2.1 benchmark (built by `build-cpm86.sh dhry.c`) |
+| `BIGDATA.CMD` | ready-to-run >64 KB data-structure checksum demo (built by `build-cpm86.sh bigdata.c`) |
 | `build-cpm86.sh` | the wasm/wcc → wl → bin2cmd pipeline (`CPU=` selects 8086/80186/…) |
 | `cpm86run.py` | minimal hand-written 8086 interpreter + BDOS |
 | `cpm86run_unicorn.py` | independent Unicorn/QEMU runner + BDOS console group |
