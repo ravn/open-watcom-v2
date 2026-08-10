@@ -124,6 +124,7 @@ programs is BDOS coverage, not CPU emulation.
 | `cpm86run.py` | minimal hand-written 8086 interpreter + BDOS |
 | `cpm86run_unicorn.py` | independent Unicorn/QEMU runner + BDOS console group |
 | `CPM-86_Programmers_Guide_Jan83.pdf` | Digital Research reference manual (BDOS calls, `.CMD` format, base page) |
+| `CPM-86_Programmers_Guide_Jan83.txt` | plain-text extraction of the manual (grep-able) |
 | `README-cpm86.md` | this document |
 
 ## Reference
