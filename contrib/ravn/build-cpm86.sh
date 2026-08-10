@@ -24,14 +24,20 @@ EXT=$(echo "$SRC" | sed 's/.*\.//')
 HERE=$(cd "$(dirname "$0")" && pwd)
 CMD=$(echo "$STEM" | tr '[:lower:]' '[:upper:]').CMD
 
+# Target CPU instruction level (wcc/wasm -<n>): 0=8086 (default), 1=80186,
+# 2=80286, 3=80386... Only the instruction set matters here; CP/M-86 is
+# real-mode and we run the result at instruction level (Unicorn/QEMU handles
+# 80186+ opcodes fine). Override with e.g.  CPU=1 ./build-cpm86.sh hello.asm
+CPU=${CPU:-0}
+
 # 1. Assemble or compile to an OMF object.
 case "$EXT" in
     asm)
-        wasm -0 "$SRC" -fo="$STEM.obj"
+        wasm "-$CPU" "$SRC" -fo="$STEM.obj"
         ;;
     c)
-        # 16-bit x86 (-0), tiny model (-mt), no stack checks (-s).
-        wcc -0 -mt -s -oi -zl "$SRC" -fo="$STEM.obj"
+        # 16-bit x86 (-$CPU), tiny model (-mt), no stack checks (-s).
+        wcc "-$CPU" -mt -s -oi -zl "$SRC" -fo="$STEM.obj"
         ;;
     *)
         echo "build-cpm86.sh: unknown source type: .$EXT" >&2

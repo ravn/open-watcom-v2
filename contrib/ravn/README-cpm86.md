@@ -24,6 +24,12 @@ wl   format raw bin option start=_start_ name hello.bin file hello.obj
 python3 bin2cmd.py hello.bin HELLO.CMD
 ```
 
+`build-cpm86.sh` accepts a `CPU` variable to select the instruction level
+(`-<n>`): `CPU=0` = 8086 (default), `CPU=1` = 80186, `CPU=2` = 80286, etc.
+Only the instruction set matters here -- CP/M-86 is real-mode and the result is
+run at instruction level (Unicorn/QEMU executes 80186+ opcodes fine); the
+80186's on-chip peripherals are out of scope.
+
 ### The `.CMD` header (`bin2cmd.py`)
 
 CP/M-86 executables start with a 128-byte **Command File Header**: eight 9-byte
