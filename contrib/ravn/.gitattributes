@@ -2,3 +2,6 @@
 # Prevent the repo-wide "*.cmd text" rule from mangling its line endings.
 HELLO.CMD binary
 *.CMD binary
+
+# Reference manual, keep byte-exact.
+*.pdf binary

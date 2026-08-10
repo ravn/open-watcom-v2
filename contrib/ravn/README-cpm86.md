@@ -88,9 +88,29 @@ test the pipeline in an emulator before building the OW toolchain. Layout:
    `printf`). That means a CP/M-86 startup stub (`_cstart_`) plus a BDOS-based
    shim replacing clib's INT 21h calls. Freestanding code (own BDOS calls, as
    in `hello.c`) needs none of this and is the right first milestone.
-3. **Validation** in a CP/M-86 emulator (86Box, PCem, or a CP/M-86 VM). The
-   `.CMD` structure is unit-tested, but real-hardware/emulator execution has
-   not been performed.
+3. **Validation on real CP/M-86.** The `.CMD` runs under the included
+   instruction-level emulators (see below); a full-machine emulator (86Box,
+   PCem, or a CP/M-86 VM) is still the way to validate OS-loader specifics.
+
+## Emulation / testing
+
+Two included runners execute the actual machine code at instruction level:
+
+- `cpm86run.py` — a small hand-written 8086 interpreter with a BDOS hook.
+- `cpm86run_unicorn.py` — uses **Unicorn Engine** (QEMU's CPU core), so the
+  8086/80186+ instructions are decoded by independent, well-tested code; only
+  the CP/M-86 BDOS layer is emulated here.
+
+Both print `Hello, CP/M-86 from Open Watcom!` for `HELLO.CMD`.
+
+**Scope — what "run a full program" needs:** Unicorn supplies the CPU; *we*
+supply the OS. `cpm86run_unicorn.py` implements the BDOS console/string group
+(functions 0, 1, 2, 5, 6, 9, 10, 11) and feeds console input via
+`run(path, stdin_bytes=...)`. Disk/file functions (open/close/read/write,
+15/16/20/21/…) are **not** implemented yet and raise `BdosUnimplemented` so an
+unsupported program fails loudly. Note the instruction set (incl. 80186 via
+`CPU=1`) is fully covered by Unicorn/QEMU; the remaining work to test "full"
+programs is BDOS coverage, not CPU emulation.
 
 ## Files in this proof-of-concept
 
@@ -100,5 +120,17 @@ test the pipeline in an emulator before building the OW toolchain. Layout:
 | `hello.asm` | basic freestanding CP/M-86 hello-world (wasm), raw BDOS (`INT 0E0h`) |
 | `hello.c` | same program in C via `#pragma aux`, for when a C runtime is added |
 | `HELLO.CMD` | ready-to-run executable (hand-assembled `hello.asm` + `bin2cmd`) |
-| `build-cpm86.sh` | the wasm/wcc → wl → bin2cmd pipeline |
+| `build-cpm86.sh` | the wasm/wcc → wl → bin2cmd pipeline (`CPU=` selects 8086/80186/…) |
+| `cpm86run.py` | minimal hand-written 8086 interpreter + BDOS |
+| `cpm86run_unicorn.py` | independent Unicorn/QEMU runner + BDOS console group |
+| `CPM-86_Programmers_Guide_Jan83.pdf` | Digital Research reference manual (BDOS calls, `.CMD` format, base page) |
 | `README-cpm86.md` | this document |
+
+## Reference
+
+`CPM-86_Programmers_Guide_Jan83.pdf` is the authoritative Digital Research
+*CP/M-86 Operating System Programmer's Guide* (Jan 1983). It documents the BDOS
+function numbers, the `.CMD` command-file / group-descriptor format, the base
+page, and the segment/entry conventions this PoC implements. Mirrored from
+[bitsavers](http://www.bitsavers.org/pdf/digitalResearch/cpm-86/); the CP/M
+documentation was released for free non-commercial use by the copyright holder.
