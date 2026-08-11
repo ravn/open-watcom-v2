@@ -305,6 +305,10 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False):
         pass
     if state.get("error"):
         raise state["error"]
+    if os.environ.get("CPM86_DEBUG_CLOCK"):
+        secs = state["ticks"] / CLOCK_HZ if CLOCK_HZ else 0
+        print("cpm86: code-bytes=%d CLOCK_HZ=%d emulated-seconds=%.3f"
+              % (state["ticks"], CLOCK_HZ, secs), file=sys.stderr)
     text = out.decode("cp437", errors="replace")
     if count_insns:
         return text, insns["n"]

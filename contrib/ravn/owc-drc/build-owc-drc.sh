@@ -158,7 +158,13 @@ c90lib-peep-stm8.c c90lib-htab.c stdcbench.c"
     link SCB "$objs"
     cp SCB.CMD "$HERE/SCB.CMD"
     echo "== running SCB.CMD =="
-    python3 "$RUNNER" "$HERE/SCB.CMD"
+    # stdcbench times itself with the emulator's Concurrent CP/M-86 T_GET clock
+    # (1-second resolution).  One benchmark iteration is heavy, so the emulated
+    # CPU rate must be high enough that an iteration fits inside the module's
+    # timing window (8 s / 40 s); otherwise the single overshooting iteration
+    # makes the score-normalisation underflow to 0.  700000 keeps each module at
+    # one (cheap) iteration while giving reproducible non-zero scores.
+    CPM86_CLOCK_HZ="${CPM86_CLOCK_HZ:-700000}" python3 "$RUNNER" "$HERE/SCB.CMD"
     ;;
 *)
     echo "usage: $0 [hello|dhry|stdcbench]" >&2; exit 2;;

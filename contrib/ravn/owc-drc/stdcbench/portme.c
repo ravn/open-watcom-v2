@@ -3,22 +3,36 @@
    Entry point is cmain (owcrt.asm bridges DR C's "main" to it, because Open
    Watcom special-cases the name "main").  See ../README.md.
 
-   stdcbench_clock() returns a deterministic virtual clock: each call advances
-   the counter by a fixed step, so the benchmark loops a fixed number of times
-   and the score is reproducible.  It does NOT reflect real elapsed time (an
-   instruction-level emulator has no wall clock). */
+   stdcbench_clock() reads the emulator's Concurrent CP/M-86 date/time clock
+   (T_GET, BDOS 105), so the benchmark measures genuine elapsed (emulated)
+   time.  The clock has 1-second resolution and is deterministic (host
+   independent), so scores are reproducible and reflect how much work the
+   emulated 8086 completes per second -- see STDCBENCH_CLOCKS_PER_SEC = 1. */
 #include <stdio.h>
 #include "stdcbench.h"
 
-/* One virtual "tick" per stdcbench_clock() call.  The benchmark loops
-   do{ work } while(clock()-start < SECONDS), calling clock() once per
-   iteration; SECONDS is CLOCKS_PER_SEC*8 (c90base) and *40 (c90lib).  A
-   step >= the largest SECONDS makes every module run exactly one iteration,
-   which keeps the emulated run short while still producing the fixed,
-   reproducible scores (c90base = 2, c90lib = 10). */
-#define STDCBENCH_TICK_STEP 40000ul
+/* CP/M-86 BDOS entry: CL = function, DX = parameter, result in AX.  T_GET
+   (function 105) fills a time-of-day structure at DS:DX and returns the
+   seconds field (BCD) in AL. */
+extern unsigned bdos(unsigned char func, unsigned dx);
+#pragma aux bdos =              \
+    "int 0E0h"                  \
+    parm [cl] [dx]              \
+    value [ax]                  \
+    modify [ax bx cx dx es];
 
-unsigned long stdcbench_virtual_clock;
+/* T_GET's structure: word date (day 1 == 1978-01-01), then hour and minute
+   as packed BCD; seconds (BCD) come back in AL. */
+struct stdcbench_tod {
+    unsigned      date;
+    unsigned char hour;
+    unsigned char minute;
+};
+
+static unsigned long stdcbench_bcd2bin(unsigned char b)
+{
+    return (unsigned long)((b >> 4) * 10 + (b & 0x0F));
+}
 
 /* --- Heap base fix for DR C on this hybrid Open-Watcom/DR-C link ---------
    DR C's heap pointer HP. is initialised (in m.init.heap) from the BSS word
@@ -41,8 +55,15 @@ static void stdcbench_init_heap(void)
 
 stdcbench_clock_t stdcbench_clock(void)
 {
-    stdcbench_virtual_clock += STDCBENCH_TICK_STEP;
-    return (stdcbench_clock_t)stdcbench_virtual_clock;
+    struct stdcbench_tod tod;
+    unsigned char        seconds;
+
+    seconds = (unsigned char)(bdos(105, (unsigned)&tod) & 0xFF);
+
+    return (stdcbench_clock_t)tod.date * 86400ul
+         + stdcbench_bcd2bin(tod.hour) * 3600ul
+         + stdcbench_bcd2bin(tod.minute) * 60ul
+         + stdcbench_bcd2bin(seconds);
 }
 
 void stdcbench_error(const char *message)
