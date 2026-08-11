@@ -122,6 +122,46 @@ builds. The register trick pays off in proportion to how call-heavy (rather than
 loop-heavy) the program is; a compute-bound kernel with few calls would see even
 less, while a call-heavy one would see more.
 
+### A second benchmark: fixed-point Mandelbrot (compute-bound)
+
+`mandel.c` is the compute-bound counterpart to Dhrystone: an 80×25 ASCII
+Mandelbrot set in fixed-point 8.8 arithmetic (`FP_MUL(a,b) = (int)((long)a*b>>8)`,
+30 iterations/cell), ported verbatim from the llvm-z80 test-gen example
+`z80-utils/test-gen/examples/mandelbrot.c`. Output is deterministic — 25 lines ×
+80 columns, no timing, no input — so every build must reproduce the DR C oracle
+byte-for-byte. The only I/O primitive is the shared `putchar.asm` (BDOS
+function 2, `C_WRITE`), identical in all four builds, so the measured work is the
+fixed-point loop rather than two different libc stdout paths. Reproduce with
+`./bench-mandel.sh` (or `DRC_HOME=… ./bench-mandel.sh` to rebuild the oracle).
+
+Mandelbrot, estimated 80186 clocks @ 6 MHz (all **MATCH** the DR C oracle output):
+
+| build | size (B) | instructions | ~80186 clocks | ~ms @6 MHz | vs DR C |
+|-------|---------:|-------------:|--------------:|-----------:|--------:|
+| **DR C** (oracle/baseline) | 14,208 | 2,956,266 | 26,780,030 | 4463.3 | 1.00× |
+| Open Watcom **O0** (`-ecc -od`) | 14,336 | 2,512,894 | 17,367,401 | 2894.6 | 0.65× |
+| Open Watcom **O3** (`-ecc -ox`) | 14,208 | 1,990,964 | 15,131,046 | 2521.8 | **0.57×** |
+| Open Watcom **mixed** (`-ox`, register) | 14,208 | 1,990,970 | 15,131,106 | 2521.9 | 0.57× |
+
+Two things stand out against the Dhrystone table:
+
+1. **The optimiser gap is bigger** — O3 is **0.57×** the DR C clocks here (−43 %)
+   versus 0.67× (−33 %) on Dhrystone. A tight arithmetic kernel is exactly where
+   Open Watcom's expression/loop optimisation and its inline long-multiply beat
+   DR C's straightforward 1984 code generation; there is no `strcpy`/struct work
+   to dilute the win.
+
+2. **O3 and mixed are identical** (15,131,046 vs 15,131,106 clocks — a 60-clock,
+   0.0004 % difference). This is the case the Dhrystone write-up predicted: a
+   compute-bound kernel with **no user↔user calls** (everything is inlined in
+   `main`; the only call is the cdecl `putchar`) gives the register-calling
+   convention nothing to optimise. The `mixed` trick helps in proportion to how
+   call-heavy a program is, and Mandelbrot is the opposite extreme from a
+   call-heavy one.
+
+Size is ~14 KB for every build because the `.CMD` is dominated by the linked
+DR C run-time (`clears.l86`), not the few hundred bytes of kernel code.
+
 ## How Watcom is made compatible with DR C — the facts (all verified)
 
 ### 1. Object format: Watcom OMF links with DR LINK-86 as-is

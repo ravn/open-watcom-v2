@@ -6,6 +6,7 @@
 #
 # Targets:
 #   ./build-owc-drc.sh            build+run the hello smoke test
+#   ./build-owc-drc.sh mandel     build+run the fixed-point Mandelbrot kernel
 #   ./build-owc-drc.sh dhry       fetch, build+run unmodified Dhrystone 2.1
 #
 # Prerequisites:
@@ -108,6 +109,23 @@ dhry)
     echo "== running DHRY.CMD (50 runs) =="
     printf '50\n' | python3 "$RUNNER" "$HERE/DHRY.CMD"
     ;;
+mandel)
+    # 80x25 ASCII Mandelbrot, fixed-point 8.8 (owc-drc/mandel.c), ported from
+    # the llvm-z80 test-gen example.  Output is deterministic (no timing, no
+    # input); the only I/O primitive is the shared putchar.asm (BDOS C_WRITE),
+    # so it links WITHOUT DR C's buffered stdio.  owmath.asm supplies the
+    # 32-bit long helpers FP_MUL's (long)a*b>>8 needs.
+    cp "$HERE/mandel.c" MANDEL.C
+    cp "$HERE/putchar.asm" putchar.asm
+    cp "$HERE/stdcbench/owmath.asm" owmath.asm
+    "$BIN/bwasm" -0 -ms putchar.asm -fo=PUTCHAR.OBJ >/dev/null
+    "$BIN/bwasm" -0 -ms owmath.asm  -fo=OWMATH.OBJ  >/dev/null
+    "$BIN/bwcc" $CFLAGS -Dmain=cmain MANDEL.C -fo=MANDEL.OBJ >/dev/null
+    link MANDEL "OWCRT,MANDEL,PUTCHAR,OWMATH"
+    cp MANDEL.CMD "$HERE/MANDEL.CMD"
+    echo "== running MANDEL.CMD =="
+    python3 "$RUNNER" "$HERE/MANDEL.CMD"
+    ;;
 stdcbench)
     # Build stdcbench 0.8 (Philipp Klaus Krause) -- the c90base + c90lib
     # integer benchmark modules -- on Open Watcom C + DR C.  Float/double
@@ -177,5 +195,5 @@ c90lib-peep-stm8.c c90lib-htab.c stdcbench.c"
     CPM86_CLOCK_HZ="${CPM86_CLOCK_HZ:-700000}" python3 "$RUNNER" "$HERE/SCB.CMD"
     ;;
 *)
-    echo "usage: $0 [hello|dhry|stdcbench]" >&2; exit 2;;
+    echo "usage: $0 [hello|mandel|dhry|stdcbench]" >&2; exit 2;;
 esac

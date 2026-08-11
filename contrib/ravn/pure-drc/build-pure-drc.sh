@@ -28,7 +28,11 @@ DRC_INC=${DRC_INC:-"$HERE/../owc-drc/drc"}
 XDEV=${XDEV:-"$HERE/../cpm86-crossdev"}
 DHRY_SRC=${DHRY_SRC:-"$HERE/../owc-drc/dhry21"}
 RUNNER="$HERE/../cpm86run_unicorn.py"
-WORK=$(mktemp -d /tmp/puredrc-build.XXXXXX)
+BIN=${BIN:-"$HERE/../../../build/binbuild"}   # Open Watcom bwasm (for putchar.obj)
+# Short WORK template on purpose: bwasm stamps the OBJ's absolute source path
+# into the OMF THEADR, and CP/M DR LINK-86 rejects a long one (OBJECT FILE
+# ERROR 10).  macOS resolves /tmp -> /private/tmp, so keep the suffix short.
+WORK=$(mktemp -d /tmp/pdrc.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
 
 need() { [ -e "$1" ] || { echo "ERROR: missing $2: $1" >&2; exit 1; }; }
@@ -57,8 +61,23 @@ case "$TARGET" in
     python3 "$HERE/drcify.py" "$DHRY_SRC" "$WORK" "${RUNS:-200}"
     UNITS="DHRY_1 DHRY_2"
     OUT=dhry.cmd ;;
+  mandel)
+    # 80x25 fixed-point Mandelbrot (../owc-drc/mandel.c).  The SAME source the
+    # Open Watcom variants use; DR C v1.11 accepts it as-is (K&R decls, its
+    # entry is "main").  putchar() is the shared BDOS-C_WRITE stub in
+    # ../owc-drc/putchar.asm, assembled with Open Watcom bwasm (DR LINK-86
+    # accepts the OMF); this keeps the output primitive byte-identical to the
+    # Watcom builds and off DR C's buffered stdio.
+    need "$HERE/../owc-drc/mandel.c" "mandel source"
+    need "$BIN/bwasm" "Open Watcom bwasm (set BIN)"
+    cp "$HERE/../owc-drc/mandel.c" "$WORK/MANDEL.C"
+    cp "$HERE/../owc-drc/putchar.asm" "$WORK/putchar.asm"
+    ( cd "$WORK" && "$BIN/bwasm" -0 -ms putchar.asm -fo=PUTCHAR.OBJ >/dev/null )
+    UNITS="MANDEL"
+    EXTRA="PUTCHAR"
+    OUT=mandel.cmd ;;
   *)
-    echo "usage: $0 {sample|dhry}" >&2; exit 2 ;;
+    echo "usage: $0 {sample|dhry|mandel}" >&2; exit 2 ;;
 esac
 
 # emu2 needs a controlling TTY, so drive the DR tools through a pty.  (macOS has
@@ -109,7 +128,7 @@ done
 echo "==> linking with DR LINK-86"
 LINKUNITS=$(echo "$UNITS" | tr ' ' ',')
 NAME=$(echo "$OUT" | sed 's/\.cmd$//' | tr 'a-z' 'A-Z')
-ptyrun "$CPM86" link86.cmd "$NAME=$LINKUNITS,CLEARS.L86[S]" | grep -iE 'error|CODE|DATA' || true
+ptyrun "$CPM86" link86.cmd "$NAME=$LINKUNITS${EXTRA:+,$EXTRA},CLEARS.L86[S]" | grep -iE 'error|CODE|DATA' || true
 need "$WORK/$OUT" "linked .CMD"
 cp "$WORK/$OUT" "$HERE/$OUT"
 echo "==> built $HERE/$OUT ($(wc -c < "$HERE/$OUT") bytes)"
