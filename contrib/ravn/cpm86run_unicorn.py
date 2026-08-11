@@ -9,9 +9,12 @@ hooking the interrupt.
 
 This is a CPU + BDOS harness, not a full CP/M-86 machine: Unicorn provides the
 instruction set (incl. 80186+), and this file emulates the BDOS system calls a
-program makes. The console/string group is implemented; disk/file functions are
-not yet (they raise a clear "unimplemented BDOS function" error so unsupported
-programs fail loudly instead of silently).
+program makes. The console/string group is implemented, plus S_BDOSVER (12) and
+the Concurrent CP/M-86 date/time calls T_SET (104) / T_GET (105) -- so a stock
+DATE.CMD prints the correct date. All of this is a superset of plain CP/M-86,
+so ordinary CP/M-86 programs keep working. Every other function (disk/file, and
+the rest of the Concurrent CP/M API) raises a clear "unimplemented BDOS
+function" error, so unsupported programs fail loudly instead of silently.
 
 Program load emulates the CCP: the memory model (8080 / small) is read from the
 .CMD group descriptors, groups are placed in memory, segment registers and the
@@ -22,11 +25,13 @@ at 0080H) is populated from the command line via the ccp module.
 
 import os
 import sys
-from unicorn import (Uc, UC_ARCH_X86, UC_MODE_16, UC_HOOK_INTR, UC_HOOK_CODE)
+import datetime
+from unicorn import (Uc, UC_ARCH_X86, UC_MODE_16, UC_HOOK_INTR, UC_HOOK_CODE,
+                     UC_HOOK_BLOCK)
 from unicorn.x86_const import (
     UC_X86_REG_CS, UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_SS,
     UC_X86_REG_SP, UC_X86_REG_IP, UC_X86_REG_CX, UC_X86_REG_DX,
-    UC_X86_REG_AX,
+    UC_X86_REG_AX, UC_X86_REG_BX,
 )
 
 import bin2cmd
@@ -38,6 +43,29 @@ MEM_BASE = 0x0000
 MEM_SIZE = 0x100000    # 1 MB, must be page aligned for Unicorn
 MAX_INSNS = 200_000_000  # runaway guard (large enough for real benchmarks)
 
+# --- Concurrent CP/M-86 clock emulation ----------------------------------
+# Ordinary CP/M-86 (1.x) has no clock, but Concurrent CP/M-86 / CP/M-86 Plus
+# add T_GET (BDOS 105) "get date and time".  We report a BDOS version of 3.1
+# from S_BDOSVER (BDOS 12) so date/time-aware programs know T_GET is available,
+# while staying backward compatible: the value is still >= 2.2, so plain
+# CP/M-86 programs that only check "at least version 2.x" keep working.
+BDOS_VERSION = int(os.environ.get("CPM86_BDOS_VERSION", "0x0031"), 0)
+
+# The emulator has no hardware clock, so T_GET's base date/time is the host's
+# real wall clock at the moment the program starts (so a stock DATE.CMD prints
+# the correct current date), and it then advances by a deterministic virtual
+# clock: the number of code bytes executed so far (counted by a block hook),
+# divided by CLOCK_HZ, gives the emulated elapsed seconds added on top.  The
+# absolute time therefore tracks reality, while elapsed *differences* -- all a
+# benchmark's "while(clock()-start<N)" loop actually uses -- stay host
+# independent and reproducible, proportional to the work the emulated 8086 does.
+# Set CPM86_EPOCH (e.g. "2024-01-01T00:00:00") to pin the base for a fully
+# deterministic absolute clock; tune the rate via CPM86_CLOCK_HZ.
+CLOCK_HZ = int(os.environ.get("CPM86_CLOCK_HZ", "20000"))
+
+# CP/M's date field is a day number with day 1 == 1 January 1978.
+CPM_DAY_ONE = datetime.date(1978, 1, 1)
+
 
 class Done(Exception):
     pass
@@ -45,8 +73,8 @@ class Done(Exception):
 
 class BdosUnimplemented(Exception):
     def __init__(self, func):
-        super().__init__(f"unimplemented CP/M-86 BDOS function {func} "
-                         f"(0x{func:02X})")
+        super().__init__(f"unimplemented CP/M-86 / Concurrent CP/M BDOS "
+                         f"function {func} (0x{func:02X}) -- refusing to run")
         self.func = func
 
 
@@ -128,6 +156,35 @@ def _load(uc, data, cmdline):
     return code_seg, entry_ip
 
 
+def _bcd(n):
+    """8-bit packed BCD of n (0..99), as CP/M's clock fields are BCD."""
+    return ((n // 10) << 4) | (n % 10)
+
+
+def _clock_base():
+    """The base date/time for T_GET: CPM86_EPOCH if set, else the host now."""
+    env = os.environ.get("CPM86_EPOCH")
+    if env:
+        return datetime.datetime.fromisoformat(env)
+    return datetime.datetime.now()
+
+
+def _write_tod(uc, seg, off, base_dt, elapsed_seconds):
+    """Write a Concurrent CP/M-86 time-of-day (TOD) structure at seg:off and
+    return the seconds field (BCD), which T_GET hands back in AL.
+
+    Layout (System Guide, T_GET): word date (day number, day 1 = 1978-01-01),
+    byte hour (BCD), byte minute (BCD); seconds (BCD) are returned in AL.  The
+    value is base_dt + elapsed_seconds, so it tracks the real date while still
+    advancing monotonically with emulated work."""
+    now = base_dt + datetime.timedelta(seconds=elapsed_seconds)
+    day = (now.date() - CPM_DAY_ONE).days + 1
+    base = (seg << 4) + (off & 0xFFFF)
+    uc.mem_write(base, bytes([day & 0xFF, (day >> 8) & 0xFF,
+                              _bcd(now.hour), _bcd(now.minute)]))
+    return _bcd(now.second)
+
+
 def run(path, cmdline=None, stdin_bytes=b"", count_insns=False):
     """Load and run a .CMD file. Returns the captured console output (str).
 
@@ -155,11 +212,14 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False):
 
     out = bytearray()
     inp = bytearray(stdin_bytes)
-    state = {"error": None}
+    state = {"error": None, "ticks": 0, "base_dt": _clock_base()}
 
     def set_al(val):
         ax = uc.reg_read(UC_X86_REG_AX) & 0xFF00
         uc.reg_write(UC_X86_REG_AX, ax | (val & 0xFF))
+
+    def set_ax(val):
+        uc.reg_write(UC_X86_REG_AX, val & 0xFFFF)
 
     def next_in():
         return inp.pop(0) if inp else 0
@@ -211,11 +271,27 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False):
             uc.mem_write((ds << 4) + dx + 2, bytes(line))
         elif func == 11:                             # C_STAT (console status)
             set_al(1 if inp else 0)
+        elif func == 12:                             # S_BDOSVER (version)
+            set_ax(BDOS_VERSION)                      # 3.1 -> date/time present
+            uc.reg_write(UC_X86_REG_BX, BDOS_VERSION)
+        elif func == 104:                            # T_SET (set date/time)
+            set_al(0)                                 # accepted, no-op clock
+        elif func == 105:                            # T_GET (get date/time)
+            elapsed = state["ticks"] // CLOCK_HZ if CLOCK_HZ else 0
+            al = _write_tod(uc, ds, dx, state["base_dt"], elapsed)
+            set_al(al)                                # AL = seconds (BCD)
         else:
             uc.emu_stop()
             state["error"] = BdosUnimplemented(func)
 
     uc.hook_add(UC_HOOK_INTR, hook_intr)
+
+    # Deterministic virtual clock: count code bytes executed (per basic block,
+    # so the overhead is far lower than a per-instruction hook).  T_GET turns
+    # this into emulated seconds via CLOCK_HZ.
+    def hook_block(uc, address, size, user_data):
+        state["ticks"] += size
+    uc.hook_add(UC_HOOK_BLOCK, hook_block)
 
     insns = {"n": 0}
     if count_insns:
