@@ -1,10 +1,11 @@
 /* portme.h -- stdcbench port for Open Watcom C -> Digital Research C
    run-time on CP/M-86, run under an instruction-level emulator.
 
-   There is no wall clock, so stdcbench_clock() (in portme.c) returns a
-   deterministic virtual counter.  The reported score is therefore a fixed,
-   reproducible figure that reflects a constant iteration count rather than
-   real time -- like the dummy timer used for Dhrystone in this deliverable. */
+   stdcbench_clock() (in portme.c) currently returns a deterministic virtual
+   counter, so the reported score is a fixed, reproducible figure reflecting a
+   constant iteration count rather than elapsed time.  (Dhrystone's glue.c has
+   since been switched to the emulator's real Concurrent CP/M-86 T_GET clock;
+   stdcbench could be rewired the same way -- see issue #3.) */
 typedef unsigned long stdcbench_clock_t;
 #define STDCBENCH_CLOCKS_PER_SEC 1000ul
 

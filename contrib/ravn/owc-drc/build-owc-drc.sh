@@ -85,7 +85,8 @@ dhry)
     cp "$DHRY/dhry_2.c" DHRY_2.C
     cp "$DHRY/dhry.h"   dhry.h
     cp "$HERE/glue.c" GLUE.C
-    # -DTIME selects the time()-based timing path (see glue.c dummy timer);
+    # -DTIME selects the time()-based timing path; glue.c's time() reads the
+    # emulator's Concurrent CP/M-86 T_GET (BDOS 105) clock (1-second resolution);
     # -Dmain=cmain avoids Open Watcom's special-casing of the name "main";
     # -i. finds the DR C headers copied into this work dir.
     for u in DHRY_1 DHRY_2; do

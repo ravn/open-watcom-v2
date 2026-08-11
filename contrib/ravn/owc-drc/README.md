@@ -22,8 +22,9 @@ DR C library                                              → CLEARS.L86 ┘
 * `./build-owc-drc.sh` (or `hello`) →
   `Hello from Open Watcom C + DR C run-time on CP/M-86: 42 FF ok`
 * `./build-owc-drc.sh dhry` → fetches **unmodified** Dhrystone 2.1 and runs it to
-  completion; every self-check variable matches its expected value (the
-  Dhrystones/sec figure is meaningless by design — see the dummy timer below).
+  completion; every self-check variable matches its expected value, and it now
+  reports a real (emulated) timing via the Concurrent CP/M-86 clock — see the
+  timer section below.
 
 ## Quick start
 
@@ -99,14 +100,18 @@ The DR C headers extracted from the floppy image contain CP/M text padding
 may also use minimal neutral prototypes (as `hello.c` does for `printf`) instead
 of the DR C headers.
 
-### The dummy timer (`glue.c`)
+### The timer (`glue.c`)
 
-Dhrystone needs `time()` for its timing loop, but plain CP/M-86 has no standard
-clock call and an instruction-level emulator has no wall clock. `glue.c` supplies
-a deterministic **dummy** `time()`; the benchmark runs to completion and its
-self-check output is valid, but the reported Dhrystones/sec is meaningless.
-Replace it with a real BDOS/CCP/M clock read on hardware or a full-machine
-emulator.
+Dhrystone needs `time()` for its timing loop. Plain CP/M-86 has no time-of-day
+call, but Concurrent CP/M-86 adds **T_GET** (BDOS function 105), which the
+`cpm86run_unicorn` emulator implements. `glue.c`'s `time()` issues that call and
+returns whole seconds (T_GET's resolution is 1 second — there is no sub-second
+field). The emulator's clock is the real base date plus a deterministic virtual
+component (proportional to the code the emulated 8086 executes), so the reported
+Dhrystones/sec is **reproducible** and scales with code efficiency and the
+emulated CPU rate (`CPM86_CLOCK_HZ`). It is a consistent synthetic figure rather
+than a hardware measurement, but the benchmark genuinely measures elapsed time
+rather than counting a dummy tick.
 
 ## Why not use Watcom's own run-time?
 
@@ -142,7 +147,7 @@ using the bundled `diskdefs` format `drc-rc759`. A newer v1.11 image exists at
 | `owcrt.asm` | CP/M-86 entry object: `jmp _main` + `main → cmain` bridge, segment `CODE`/`CGROUP`. |
 | `compat.h` | Forced-include naming shim (`#pragma aux default "*";`). |
 | `hello.c` | printf smoke test (entry `cmain`). |
-| `glue.c` | Dummy `time()` for benchmark timing (non-static global). |
+| `glue.c` | Real `time()` via Concurrent CP/M-86 T_GET (BDOS 105), non-static global. |
 | `diskdefs` | `cpmtools` format `drc-rc759` for the DDHF DR C floppy. |
 
 Downloaded and generated artifacts (`Digital-Research-C-May84.bin`, `drc/`,
