@@ -34,6 +34,72 @@ DR C library                                              → CLEARS.L86 ┘
 ./build-owc-drc.sh dhry # unmodified Dhrystone 2.1
 ```
 
+## DR C as the oracle and the size/speed baseline
+
+Genuine Digital Research C (DR C 1.11) is treated as the **correctness oracle**
+and the **size/speed baseline**: whatever DR C does is *defined* to be correct,
+and every Open Watcom build is scored relative to it. The harness lives one
+level up in [`../`](..):
+
+* `../cycles186.py` — an iAPX 186 (80186) **clock-cycle estimator** ("ticks").
+  Unicorn is a *functional* emulator with no notion of time, so it can only
+  count instructions. `cycles186.py` layers a capstone decode + an 80186 clock
+  table on top to estimate cycles. It does **not** model the prefetch queue or
+  memory wait-states, so the figure is deliberately "cirka-ish"; for true
+  cycle-accurate timing use MAME or PCE against the real RC759 XIOS. The 186 has
+  hardware effective-address calculation (no separate EA penalty) and much
+  faster `MUL`/`DIV` than the 8086, and memory/stack operands cost roughly 3×
+  a register operand — which is why raw instruction counts *understate* how much
+  Open Watcom's register allocation beats DR C's memory-heavy code.
+* `../bench.py` — `measure` / `compare` / `baseline`. `compare ORACLE CANDIDATE`
+  runs both `.CMD`s on the Unicorn harness and reports size, instructions,
+  estimated 80186 clocks and (at `--mhz`, default **6**, the RC759 Piccoline)
+  an estimated wall-clock time, plus a **behaviour verdict** — MATCH only if the
+  candidate reproduces the DR C oracle output byte-for-byte (Dhrystone's one
+  documented implementation-dependent value, `Ptr_Comp`, is masked).
+* `../baseline.json` — the persisted DR C oracle numbers, so `bench.py baseline
+  check` works **without** the (copyright) DRI toolchain present.
+* `./bench.sh` — one reproducible driver: it builds Dhrystone several ways from
+  the **same** drcified, deterministic source (fixed run count, timing disabled
+  → identical output) in the **same** small/8080 memory model DR C uses, then
+  prints the matrix. The only thing that varies is the Open Watcom code
+  generator settings.
+
+The comparison is apples-to-apples because the memory model is identical (both
+are small/8080: one `CODE` group + one 64 KB `DATA` group, near pointers,
+`SS == DS`, verified from the `.CMD` group descriptors), the source is identical,
+and the run is deterministic.
+
+### Optimisation level and calling convention
+
+Three Open Watcom variants are compared against the DR C oracle:
+
+| variant | flags | calls |
+|---------|-------|-------|
+| **O0**  | `-ecc -od` | cdecl (stack), optimiser disabled (≈ `-O0`) |
+| **O3**  | `-ecc -ox` | cdecl (stack), full optimisation (≈ `-O2`/`-O3`) |
+| **mixed** | `-ox` (no `-ecc`) | **register** calls user↔user, cdecl to the DR C library |
+
+The *mixed* variant is the same trick used for LLVM-Z80: user-space functions
+call each other in registers (Open Watcom's default `__watcall`), while only the
+DR C library entry points are forced back onto the stack via
+`-fi=compat-mixed.h`, which aliases each libc function to the built-in `__cdecl`
+convention with its name forced verbatim (`#pragma aux (__cdecl) printf "*";`).
+
+Dhrystone 2.1, 200 runs, estimated 80186 clocks @ 6 MHz (all **MATCH** the DR C
+oracle output):
+
+| build | size (B) | instructions | ~80186 clocks | ~ms @6 MHz | vs DR C |
+|-------|---------:|-------------:|--------------:|-----------:|--------:|
+| **DR C** (oracle/baseline) | 30,464 | 397,284 | 2,950,838 | 491.8 | 1.00× |
+| Open Watcom **O0** (`-ecc -od`) | 29,056 | 293,194 | 2,376,097 | 396.0 | 0.81× |
+| Open Watcom **O3** (`-ecc -ox`) | 28,544 | 259,984 | 1,969,511 | 328.3 | 0.67× |
+| Open Watcom **mixed** (`-ox`, register) | 28,544 | 249,390 | 1,864,971 | 310.8 | **0.63×** |
+
+So on this benchmark full optimisation buys ~33 % fewer clocks than DR C, and
+switching user-space calls from the stack to registers saves a further ~5 %.
+Reproduce with `./bench.sh` (or `./bench.sh --mhz 8` for a different clock).
+
 ## How Watcom is made compatible with DR C — the facts (all verified)
 
 ### 1. Object format: Watcom OMF links with DR LINK-86 as-is
@@ -152,6 +218,7 @@ using the bundled `diskdefs` format `drc-rc759`. A newer v1.11 image exists at
 | `build-owc-drc.sh` | Compile (Watcom) → link (DR LINK-86) → run (Unicorn); targets `hello`, `dhry`. |
 | `owcrt.asm` | CP/M-86 entry object: `jmp _main` + `main → cmain` bridge, segment `CODE`/`CGROUP`. |
 | `compat.h` | Forced-include naming shim (`#pragma aux default "*";`). |
+| `compat-mixed.h` | Mixed-convention shim: register calls user↔user, cdecl to libc (`#pragma aux (__cdecl) printf "*";`). |
 | `hello.c` | printf smoke test (entry `cmain`). |
 | `glue.c` | RC759 XIOS 16 ms `clock()` (Int 28h fn 19) + T_GET `time()`, non-static globals. |
 | `dhry-time.h` | Tiny `<time.h>` shim (`CLK_TCK`=1000, `clock_t`) so unmodified Dhrystone builds with its `MSC_CLOCK` path. |

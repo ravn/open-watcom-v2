@@ -224,7 +224,8 @@ def _write_tod(uc, seg, off, base_dt, elapsed_seconds):
     return _bcd(now.second)
 
 
-def run(path, cmdline=None, stdin_bytes=b"", count_insns=False):
+def run(path, cmdline=None, stdin_bytes=b"", count_insns=False,
+        count_cycles=False):
     """Load and run a .CMD file. Returns the captured console output (str).
 
     cmdline is the command line as an operator would type it, e.g.
@@ -357,15 +358,57 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False):
     uc.hook_add(UC_HOOK_BLOCK, hook_block)
 
     insns = {"n": 0}
-    if count_insns:
+    if count_insns and not count_cycles:
         def hook_code(uc, address, size, user_data):
             insns["n"] += 1
         uc.hook_add(UC_HOOK_CODE, hook_code)
+
+    # Estimated 80186 execution cycles ("ticks").  Unicorn models no timing, so
+    # we decode each executed instruction (capstone) and add its iAPX 186 clock
+    # count from cycles186.Cycle186.  Conditional branches/loops need to know
+    # whether they were taken; we defer a branch's cost until the next
+    # instruction executes and infer taken = (next address != fall-through).
+    cyc = {"n": 0}
+    if count_cycles:
+        from cycles186 import Cycle186
+        model = Cycle186()
+        dec = {}                       # linear addr -> (cs_insn, is_cond)
+        pend = {"insn": None, "fall": 0}
+
+        def _decode(address, size):
+            hit = dec.get(address)
+            if hit is not None:
+                return hit
+            code = bytes(uc.mem_read(address, size))
+            ins = next(model.md.disasm(code, address), None)
+            hit = (ins, bool(ins) and model.is_conditional_branch(ins))
+            dec[address] = hit
+            return hit
+
+        def hook_cycles(uc, address, size, user_data):
+            insns["n"] += 1
+            p = pend["insn"]
+            if p is not None:                       # resolve prior branch
+                taken = (address != pend["fall"])
+                cyc["n"] += model.clocks(p, taken=taken)
+                pend["insn"] = None
+            ins, is_cond = _decode(address, size)
+            if ins is None:
+                cyc["n"] += 4
+                return
+            if is_cond:                             # defer until we see target
+                pend["insn"] = ins
+                pend["fall"] = address + size
+            else:
+                cyc["n"] += model.clocks(ins)
+        uc.hook_add(UC_HOOK_CODE, hook_cycles)
 
     try:
         uc.emu_start((cs << 4) + ip, 0, count=MAX_INSNS)
     except Exception:
         pass
+    if count_cycles and pend["insn"] is not None:   # flush trailing branch
+        cyc["n"] += model.clocks(pend["insn"], taken=True)
     if state.get("error"):
         raise state["error"]
     if os.environ.get("CPM86_DEBUG_CLOCK"):
@@ -376,6 +419,8 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False):
               % (state["ticks"], CLOCK_HZ, secs, TICK_MS, ticks16),
               file=sys.stderr)
     text = out.decode("cp437", errors="replace")
+    if count_cycles:
+        return text, insns["n"], cyc["n"]
     if count_insns:
         return text, insns["n"]
     return text
@@ -383,12 +428,15 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False):
 
 def main(argv=None):
     argv = argv or sys.argv[1:]
-    count_insns = False
-    if argv and argv[0] in ("--count", "-c"):
-        count_insns = True
+    count_insns = count_cycles = False
+    while argv and argv[0] in ("--count", "-c", "--ticks", "-t"):
+        if argv[0] in ("--count", "-c"):
+            count_insns = True
+        else:
+            count_cycles = True
         argv = argv[1:]
     if not argv:
-        print("usage: cpm86run_unicorn.py [--count] FILE.CMD [ARG ...]",
+        print("usage: cpm86run_unicorn.py [--count] [--ticks] FILE.CMD [ARG ...]",
               file=sys.stderr)
         return 2
     path = argv[0]
@@ -402,8 +450,14 @@ def main(argv=None):
         except Exception:
             stdin_bytes = b""
         result = run(path, cmdline=cmdline, stdin_bytes=stdin_bytes,
-                     count_insns=count_insns)
-        if count_insns:
+                     count_insns=count_insns, count_cycles=count_cycles)
+        if count_cycles:
+            text, n, ticks = result
+            sys.stdout.write(text)
+            sys.stdout.flush()
+            print(f"\n[{n} instructions, ~{ticks} 80186 clocks (estimate)]",
+                  file=sys.stderr)
+        elif count_insns:
             text, n = result
             sys.stdout.write(text)
             sys.stdout.flush()

@@ -28,9 +28,15 @@ DR C 1.11 cannot handle is adjusted:
   * scanf() for the run count -- replaced by a fixed count so the run is
     deterministic and needs no console input in either emulator.
 
-Usage: drcify.py SRC_DIR OUT_DIR [RUNS]
+Usage: drcify.py SRC_DIR OUT_DIR [RUNS] [DIALECT]
   SRC_DIR must contain stock dhry.h, dhry_1.c, dhry_2.c (Dhrystone 2.1).
-  OUT_DIR receives DR C-buildable dhry.h, dhry_1.c, dhry_2.c.
+  OUT_DIR receives a buildable dhry.h, dhry_1.c, dhry_2.c.
+  DIALECT is "drc" (default) or "watcom".  Both get the *deterministic*
+  changes (fixed run count, timing disabled so the "Measured time too small"
+  branch is taken) so the two builds produce byte-identical output and can be
+  compared directly.  Only "drc" additionally gets the DR C 1.11 workarounds
+  (NOENUM, NOSTRUCTASSIGN); Open Watcom compiles real enums and struct
+  assignment, so applying those to it would break its prototype checking.
 """
 import os
 import sys
@@ -38,21 +44,25 @@ import sys
 
 def main():
     if len(sys.argv) < 3:
-        sys.exit("usage: drcify.py SRC_DIR OUT_DIR [RUNS]")
+        sys.exit("usage: drcify.py SRC_DIR OUT_DIR [RUNS] [DIALECT]")
     src, out = sys.argv[1], sys.argv[2]
     runs = int(sys.argv[3]) if len(sys.argv) > 3 else 200
+    dialect = sys.argv[4] if len(sys.argv) > 4 else "drc"
+    if dialect not in ("drc", "watcom"):
+        sys.exit("dialect must be 'drc' or 'watcom'")
     os.makedirs(out, exist_ok=True)
 
     # --- dhry.h -----------------------------------------------------------
     h = open(os.path.join(src, "dhry.h")).read()
     # Do not let dhry.h force the UNIX "times" path on.
     h = h.replace("#ifndef TIME\n#undef TIMES\n#define TIMES\n#endif",
-                  "/* timing macros disabled for CP/M-86 DR C */")
-    # Compile-time knobs DR C 1.11 needs (see module docstring).
-    h = ("#define NOENUM 1\n"
-         "#define Too_Small_Time 2\n"
-         "#define HZ 60\n"
-         "#define NOSTRUCTASSIGN 1\n") + h
+                  "/* timing macros disabled for CP/M-86 */")
+    # Deterministic knobs both dialects need (force the "too small" branch).
+    knobs = "#define Too_Small_Time 2\n#define HZ 60\n"
+    if dialect == "drc":
+        # DR C 1.11 workarounds (see module docstring); Watcom must NOT get these.
+        knobs += "#define NOENUM 1\n#define NOSTRUCTASSIGN 1\n"
+    h = knobs + h
     open(os.path.join(out, "dhry.h"), "w").write(h)
 
     # --- dhry_1.c ---------------------------------------------------------
@@ -73,7 +83,7 @@ def main():
     open(os.path.join(out, "dhry_2.c"), "w").write(
         open(os.path.join(src, "dhry_2.c")).read())
 
-    print("drcify: wrote DR C-buildable dhry.[h|_1.c|_2.c] to", out,
+    print("drcify: wrote %s-buildable dhry.[h|_1.c|_2.c] to" % dialect, out,
           "(RUNS=%d)" % runs)
 
 

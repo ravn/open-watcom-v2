@@ -1,0 +1,10 @@
+{
+  "dhry": {
+    "args": "",
+    "clocks": 2950838,
+    "insns": 397284,
+    "output_normalized": "\r\nDhrystone Benchmark, Version 2.1 (Language: C)\r\n\r\nProgram compiled with 'register' attribute\r\n\r\nPlease give the number of runs through the benchmark: 200\r\n\r\nExecution starts, 200 runs through Dhrystone\r\nExecution ends\r\n\r\nFinal values of the variables used in the benchmark:\r\n\r\nInt_Glob:            5\r\n        should be:   5\r\nBool_Glob:           1\r\n        should be:   1\r\nCh_1_Glob:           A\r\n        should be:   A\r\nCh_2_Glob:           B\r\n        should be:   B\r\nArr_1_Glob[8]:       7\r\n        should be:   7\r\nArr_2_Glob[8][7]:    210\r\n        should be:   Number_Of_Runs + 10\r\nPtr_Glob->\r\n  Ptr_Comp:          <impl-defined>\r\n        should be:   (implementation-dependent)\r\n  Discr:             0\r\n        should be:   0\r\n  Enum_Comp:         2\r\n        should be:   2\r\n  Int_Comp:          17\r\n        should be:   17\r\n  Str_Comp:          DHRYSTONE PROGRAM, SOME STRING\r\n        should be:   DHRYSTONE PROGRAM, SOME STRING\r\nNext_Ptr_Glob->\r\n  Ptr_Comp:          <impl-defined>\r\n        should be:   (implementation-dependent), same as above\r\n  Discr:             0\r\n        should be:   0\r\n  Enum_Comp:         1\r\n        should be:   1\r\n  Int_Comp:          18\r\n        should be:   18\r\n  Str_Comp:          DHRYSTONE PROGRAM, SOME STRING\r\n        should be:   DHRYSTONE PROGRAM, SOME STRING\r\nInt_1_Loc:           5\r\n        should be:   5\r\nInt_2_Loc:           13\r\n        should be:   13\r\nInt_3_Loc:           7\r\n        should be:   7\r\nEnum_Loc:            1\r\n        should be:   1\r\nStr_1_Loc:           DHRYSTONE PROGRAM, 1'ST STRING\r\n        should be:   DHRYSTONE PROGRAM, 1'ST STRING\r\nStr_2_Loc:           DHRYSTONE PROGRAM, 2'ND STRING\r\n        should be:   DHRYSTONE PROGRAM, 2'ND STRING\r\n\r\nMeasured time too small to obtain meaningful results\r\nPlease increase number of runs\r\n\r\n",
+    "size": 30464,
+    "stdin": ""
+  }
+}

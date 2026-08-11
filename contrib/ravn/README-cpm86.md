@@ -355,7 +355,11 @@ emulator demo, not a portable CP/M-86 program.
 | `build-cpm86.sh` | the wasm/wcc → wl → bin2cmd pipeline (`CPU=` selects 8086/80186/…) |
 | `mkdisk-cpm86.sh` | pack the `.CMD` files into a CP/M-86 disk image (cpmtools) for full-machine emulators |
 | `cpm86run.py` | minimal hand-written 8086 interpreter + BDOS |
-| `cpm86run_unicorn.py` | independent Unicorn/QEMU runner + BDOS console group |
+| `cpm86run_unicorn.py` | independent Unicorn/QEMU runner + BDOS console group (`--count`, `--ticks`) |
+| `cycles186.py` | iAPX 186 (80186) clock-cycle estimator ("ticks") — capstone decode + clock table |
+| `bench.py` | oracle/baseline harness: `measure` / `compare` / `baseline` (DR C = 1.00× baseline) |
+| `bench.sh` | reproducible driver: builds Dhrystone O0/O3/mixed vs the DR C oracle and prints the matrix |
+| `baseline.json` | persisted DR C oracle numbers (so `bench.py baseline check` needs no DRI toolchain) |
 | `CPM-86_Programmers_Guide_Jan83.pdf` | Digital Research reference manual (BDOS calls, `.CMD` format, base page) |
 | `CPM-86_Programmers_Guide_Jan83.txt` | plain-text extraction of the manual (grep-able) |
 | `CPM-86_System_Guide_Jun83.pdf` | DR System Guide — BDOS & BIOS call reference, `.CMD` format |
