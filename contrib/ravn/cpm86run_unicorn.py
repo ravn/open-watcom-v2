@@ -249,7 +249,14 @@ def main(argv=None):
     prog = os.path.splitext(os.path.basename(path))[0].upper()
     cmdline = " ".join([prog] + list(argv[1:]))
     try:
-        result = run(path, cmdline=cmdline, count_insns=count_insns)
+        stdin_bytes = b""
+        try:
+            if not sys.stdin.isatty():
+                stdin_bytes = sys.stdin.buffer.read()
+        except Exception:
+            stdin_bytes = b""
+        result = run(path, cmdline=cmdline, stdin_bytes=stdin_bytes,
+                     count_insns=count_insns)
         if count_insns:
             text, n = result
             sys.stdout.write(text)

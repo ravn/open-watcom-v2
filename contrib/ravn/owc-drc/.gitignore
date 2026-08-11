@@ -1,0 +1,11 @@
+# downloaded DR C floppy image and extracted run-time/headers
+Digital-Research-C-May84.bin
+/drc/
+# fetched benchmark sources
+/dhry21/
+# build products
+*.CMD
+*.OBJ
+*.obj
+*.err
+link.log
