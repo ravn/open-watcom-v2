@@ -1,0 +1,13 @@
+# Copyright DRI toolchain binaries and generated artifacts (never commit).
+*.cmd
+*.CMD
+*.obj
+*.OBJ
+*.sym
+*.SYM
+*.l86
+*.L86
+clears.l86
+# but keep our own source and scripts
+!build-pure-drc.sh
+!drcify.py

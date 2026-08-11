@@ -236,6 +236,29 @@ unsupported program fails loudly. Note the instruction set (incl. 80186 via
 `CPU=1`) is fully covered by Unicorn/QEMU; the remaining work to test "full"
 programs is BDOS coverage, not CPU emulation.
 
+## Linking against the real Digital Research C run-time
+
+The freestanding demos above supply their own BDOS shims. Two sibling
+directories go further and link against the **genuine DR C libc**
+(`clears.l86`) with DR's own **LINK-86**, so ordinary C (`printf`, `malloc`,
+`scanf`, `strcpy`, …) works:
+
+- **`owc-drc/`** — the **modern Open Watcom** compiler producing objects that
+  link against the DR C run-time (OMF ↔ `.L86`, no format conversion). See
+  `owc-drc/README.md`.
+- **`pure-drc/`** — the **genuine DR C v1.11** compiler (1984) and LINK-86,
+  no Watcom at all. `pure-drc/build-pure-drc.sh` builds `sample` and Dhrystone
+  2.1 and runs each in **both** emulators (emu2 and `cpm86run_unicorn.py`) with
+  byte-identical output. See `pure-drc/README.md`.
+
+Getting pure DR C programs to run under `cpm86run_unicorn.py` required the
+runner to set up the base page like the real CCP: DR C's startup `m.init`
+initialises the small-model stack pointer from the base-page data-length field
+`LD` (offset `06H`), so the runner now sizes `LD` from the data group's `G_MAX`
+allocation (a full 64 KB) rather than the data-image size — otherwise `SP`
+lands on the heap and the program crashes. It also answers the disk-system
+BDOS calls `DRV_ALLRESET`/`DRV_SET`/`DRV_GET` (13/14/25) as drive-A: no-ops.
+
 ## Running under a real CP/M-86 (full-machine emulators)
 
 The bundled `cpm86run_unicorn.py` is an *instruction-level* harness: great for
