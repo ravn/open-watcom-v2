@@ -143,8 +143,26 @@ def _load(uc, data, cmdline):
         code_paras = (code_len + 15) // 16
         data_seg = code_seg + max(code_paras, 1)
         uc.mem_write(data_seg << 4, data_img)
-        data_len = len(data_img)
         entry_ip = 0x0000                        # small/compact enter at CS:0000
+
+        # The CCP allocates the data group up to its maximum (G_MAX paragraphs)
+        # and records that *allocated* size -- not just the initialised image --
+        # in the base page's data length field (LD, offset 06H). DR C's own
+        # startup (m.init.stack) initialises SP from LD ("mov sp,6[bx]") for
+        # small-model programs, so LD must span the whole segment the program
+        # was given; otherwise the stack lands on top of the data/heap and the
+        # program crashes. Allocate G_MAX (clamped to a full 64K segment),
+        # falling back to G_MIN / the image size when no maximum is given.
+        data_desc = next((g for g in groups
+                          if g[0] == bin2cmd.G_DATA), None)
+        img_paras = (len(data_img) + 15) // 16
+        if data_desc is not None:
+            _, _, _, dminp, dmaxp = data_desc
+            alloc_paras = dmaxp if dmaxp else max(dminp, img_paras)
+        else:
+            alloc_paras = img_paras
+        alloc_paras = max(min(alloc_paras, 0x1000), img_paras)  # cap at 64K
+        data_len = alloc_paras * 16              # LD = data_len - 1
 
     # Build the base page from the command line and write it into the data
     # segment (which equals the code segment in the 8080 model).
@@ -313,6 +331,12 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False):
         elif func == 12:                             # S_BDOSVER (version)
             set_ax(BDOS_VERSION)                      # 3.1 -> date/time present
             uc.reg_write(UC_X86_REG_BX, BDOS_VERSION)
+        elif func == 13:                             # DRV_ALLRESET (reset disks)
+            set_al(0)                                 # no auto-select, OK
+        elif func == 14:                             # DRV_SET (select disk)
+            set_al(0)                                 # selection accepted
+        elif func == 25:                             # DRV_GET (current disk)
+            set_al(0)                                 # default drive = A:
         elif func == 104:                            # T_SET (set date/time)
             set_al(0)                                 # accepted, no-op clock
         elif func == 105:                            # T_GET (get date/time)
