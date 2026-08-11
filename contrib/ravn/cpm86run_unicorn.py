@@ -92,10 +92,11 @@ class Done(Exception):
 
 
 class BdosUnimplemented(Exception):
-    def __init__(self, func):
-        super().__init__(f"unimplemented CP/M-86 / Concurrent CP/M BDOS "
+    def __init__(self, func, kind="CP/M-86 / Concurrent CP/M BDOS"):
+        super().__init__(f"unimplemented {kind} "
                          f"function {func} (0x{func:02X}) -- refusing to run")
         self.func = func
+        self.kind = kind
 
 
 def _detect_model(groups):
@@ -260,7 +261,8 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False):
                 uc.reg_write(UC_X86_REG_CX, periods & 0xFFFF)
             else:
                 uc.emu_stop()
-                state["error"] = BdosUnimplemented(0x2800 | xios_func)
+                state["error"] = BdosUnimplemented(
+                    xios_func, kind="RC759 XIOS (Int 28h)")
             return
         if intno != 0xE0:                            # only CP/M-86 BDOS
             uc.emu_stop()

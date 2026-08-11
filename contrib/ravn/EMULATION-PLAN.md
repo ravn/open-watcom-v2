@@ -103,6 +103,71 @@ Grouping for implementation:
   real DPB/allocation/directory (faithful, needed only for programs that do
   raw BIOS disk access or depend on allocation details).
 
+### RC759 XIOS interface (Int 28h) — PICCOLINE Programmer's Guide, App. A
+
+Beyond the standard CP/M-86 BDOS/BIOS, the RC759 Piccoline exposes its machine
+specific XIOS (extended I/O system) through **software interrupt `INT 28h`**,
+with the function selector in **`AL`**. This is *not* part of portable CP/M-86 —
+it is RC759 hardware access (graphics, floppy, cassette, sound, mouse, real-time
+tick, …). Two neighbouring vectors exist for completeness: `INT 29h` = net
+driver, `INT 30h` = IMC (App. C, Interrupt Vector Assignment).
+
+Our emulator implements **only function 19** (the 16 ms relative-time counter,
+the finest program-visible clock — the 80186's own timers drive sound/cassette,
+not timekeeping, per §2.3). Every other `INT 28h` function fails loud
+(`BdosUnimplemented`, kind `RC759 XIOS (Int 28h)`), so a program that reaches
+for unmodelled RC759 hardware stops with a clear message instead of misbehaving.
+
+Full `AL` function map (App. A). †19 is implemented; the rest are documented
+here for reference and currently fail loud:
+
+| AL | Function |
+|----|----------|
+| 0 | Change console to graphics mode (`AH`=1 hi-/2 medium-res; `DX:CX`→graphics control block) |
+| 1 | Change console to character mode |
+| 2 | Reserved |
+| 3 | Return address of a copy of the nonvolatile-memory contents (`ES:SI`) |
+| 4 | Return address of a configuration description (`ES:SI`) |
+| 5 | Recalibrate floppy drive (stack: drive/head/cyl/bytecount/DMA seg:off; `AL`=FDC status) |
+| 6–7 | Reserved |
+| 8 | Step floppy head one track in (stack as fn 5; `AL`=FDC status) |
+| 9 | Step floppy head one track out |
+| 10 | Write a track to floppy |
+| 11 | Read a track from floppy |
+| 12 | Write a byte to the sound generator (`DL`=byte) |
+| 13 | Get address of disk-driver statistics (`ES`=segment; read/write/error counters) |
+| 14–18 | Reserved |
+| **19†** | **Return 16 ms counter** — `AL`=19 in; `DX:AX`=seconds since boot, `CX`=elapsed 16 ms periods of the current second (16 ms resolution, relative only) |
+| 20 | Define a character in the alternative character set (`CL`=char 0-255; `DS:DX`→definition) |
+| 21 | Return pointer to a console display list (Intel 82730) |
+| 22 | Return current cursor position (`BH`=row, `BL`=column) |
+| 23 | Return status of iSBX351 controller (if installed) |
+| 24 | Initialise iSBX351 controller (stack: parameter block seg:off) |
+| 25 | Reserved |
+| 26 | Read file-header record from cassette tape (`CX`=max bytes, `DX`=buf off, stack: buf seg; `AL`=result) |
+| 27 | Write file header on cassette tape |
+| 28 | Read next data record from cassette tape |
+| 29 | Write next data record on cassette tape |
+| 30 | Mouse: `CL`=1 init / 2 deinit / 3 status (status: `AL`=0 idle/1 button+`AH`/2 moved+`BX,CX` delta) |
+| 31 | Define palette contents (`DS:DX`→palette definition) |
+| 32–34 | Reserved |
+| 35 | Write a string direct to the console buffer (`DL`=col, `DH`=row, `CX`=count, `DS:SI`→string) |
+| 36 | Set cursor position (`BH`=row, `BL`=column) |
+| 37 | Return current attributes (`AH`) |
+| 38 | Set attributes (`AH`) |
+| 39 | Update physical screen |
+| 40 | Write an end-of-file record on cassette tape |
+| 41 | DPC parallel interface: `AH`=1 reserve / 2 release |
+| 42 | Shared disk: `AH`=1 reserve / 2 release |
+| 43–49 | Reserved |
+| 50 | Reset iSBX351 |
+| 51 | Get font — return a character from the set (`CX`=char 0-1023; `DS:DX`→block) |
+| 52 | Define font — define a character in the set (`CX`=char 0-1023; `DS:DX`→block) |
+| 53 | Get XIOS version (`AH`=year, `AL`=version, `BH`=month, `BL`=day, all BCD) |
+
+Note: the Guide's fn-19 text says "periods of *next* second" — a typo for the
+*current* second (which is what the register layout and our model use).
+
 ## Staged plan
 
 ### Phase 0 — Faithful program load (correctness foundation) — **DONE**
