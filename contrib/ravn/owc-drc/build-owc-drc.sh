@@ -97,6 +97,68 @@ dhry)
     echo "== running DHRY.CMD (50 runs) =="
     printf '50\n' | python3 "$RUNNER" "$HERE/DHRY.CMD"
     ;;
+stdcbench)
+    # Build stdcbench 0.8 (Philipp Klaus Krause) -- the c90base + c90lib
+    # integer benchmark modules -- on Open Watcom C + DR C.  Float/double
+    # modules are excluded (portme.h #undefs C90FLOAT/C90DOUBLE).
+    #
+    # Three things beyond the hello/dhry pipeline are needed:
+    #   * inc/           -- neutral ANSI C90 headers (DR C predates ANSI, so
+    #                       it lacks mem*, strstr, strtol, linkable ctype);
+    #                       cpmlibc.c supplies those routines.
+    #   * omf-delocal.py -- rewrites Open Watcom's LEXTDEF/LPUBDEF (0xB4/0xB6,
+    #                       emitted for file-scope statics) to plain EXTDEF/
+    #                       PUBDEF, which 1987 DR LINK-86 accepts.
+    #   * owmath.asm     -- Watcom's 32-bit long helpers __U4M/__I4M/__U4D,
+    #                       pulled in by the unsigned-long score arithmetic.
+    #
+    # portme.c also repairs DR C's heap base (see its comments): malloc()
+    # would otherwise hand out memory on top of the program's static data.
+    SCB="$HERE/stdcbench"
+    SRC="$SCB/src/stdcbench-0.8"
+    if [ ! -d "$SRC" ]; then
+        mkdir -p "$SCB/src"
+        curl -fsSL -o "$SCB/src/stdcbench-0.8.tar.gz" \
+            "https://downloads.sourceforge.net/project/stdcbench/stdcbench-0.8.tar.gz"
+        tar xzf "$SCB/src/stdcbench-0.8.tar.gz" -C "$SCB/src"
+    fi
+    # Neutral libc headers, our glue, the OMF filter and the math helpers.
+    cp -R "$SCB/inc" inc
+    cp "$SCB/portme.h" "$SCB/portme.c" "$SCB/cpmlibc.c" \
+       "$SCB/omf-delocal.py" "$SCB/owmath.asm" .
+    # Upstream headers (portme.h above deliberately shadows the upstream one).
+    cp "$SRC/stdcbench.h" "$SRC/c90base-huffman.h" \
+       "$SRC/c90lib-htab.h" "$SRC/c90lib-peep.h" .
+    # Upstream translation units, compiled to short 8.3 names N00..N13 so the
+    # THEADR that Open Watcom stamps stays short enough for DR LINK-86.
+    upstream="c90base.c c90base-data.c c90base-compression.c c90base-isort.c \
+c90base-immul.c c90base-huffman-recursive.c c90base-huffman-iterative.c \
+c90base-huffman_tree.c c90lib.c c90lib-lnlc.c c90lib-peep.c \
+c90lib-peep-stm8.c c90lib-htab.c stdcbench.c"
+    SCFLAGS="$CFLAGS -Iinc"
+    objs="OWCRT"; i=0
+    for f in $upstream; do
+        nn="$(printf 'N%02d' "$i")"
+        cp "$SRC/$f" "$nn.C"
+        "$BIN/bwcc" $SCFLAGS "$nn.C" -fo="$nn.OBJ" >/dev/null 2>&1
+        python3 omf-delocal.py "$nn.OBJ" "$nn.OBJ"
+        objs="$objs,$nn"; i=$((i + 1))
+    done
+    # Our glue: cpmlibc (missing ANSI routines) and portme (entry/clock/heap).
+    for g in cpmlibc portme; do
+        nn="$(printf 'N%02d' "$i")"
+        cp "$g.c" "$nn.C"
+        "$BIN/bwcc" $SCFLAGS "$nn.C" -fo="$nn.OBJ" >/dev/null 2>&1
+        python3 omf-delocal.py "$nn.OBJ" "$nn.OBJ"
+        objs="$objs,$nn"; i=$((i + 1))
+    done
+    "$BIN/bwasm" -0 -ms owmath.asm -fo=OWMATH.OBJ >/dev/null
+    objs="$objs,OWMATH"
+    link SCB "$objs"
+    cp SCB.CMD "$HERE/SCB.CMD"
+    echo "== running SCB.CMD =="
+    python3 "$RUNNER" "$HERE/SCB.CMD"
+    ;;
 *)
-    echo "usage: $0 [hello|dhry]" >&2; exit 2;;
+    echo "usage: $0 [hello|dhry|stdcbench]" >&2; exit 2;;
 esac

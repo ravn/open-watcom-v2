@@ -3,6 +3,7 @@ Digital-Research-C-May84.bin
 /drc/
 # fetched benchmark sources
 /dhry21/
+/stdcbench/src/
 # build products
 *.CMD
 *.OBJ
