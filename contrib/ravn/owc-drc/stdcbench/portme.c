@@ -3,36 +3,27 @@
    Entry point is cmain (owcrt.asm bridges DR C's "main" to it, because Open
    Watcom special-cases the name "main").  See ../README.md.
 
-   stdcbench_clock() reads the emulator's Concurrent CP/M-86 date/time clock
-   (T_GET, BDOS 105), so the benchmark measures genuine elapsed (emulated)
-   time.  The clock has 1-second resolution and is deterministic (host
+   stdcbench_clock() reads the emulator's RC759 50 Hz system tick through the
+   80186 timer's I/O ports, so the benchmark measures genuine elapsed
+   (emulated) time at ~20 ms resolution.  The tick is deterministic (host
    independent), so scores are reproducible and reflect how much work the
-   emulated 8086 completes per second -- see STDCBENCH_CLOCKS_PER_SEC = 1. */
+   emulated 8086 completes per tick -- see STDCBENCH_CLOCKS_PER_SEC = 50. */
 #include <stdio.h>
 #include "stdcbench.h"
 
-/* CP/M-86 BDOS entry: CL = function, DX = parameter, result in AX.  T_GET
-   (function 105) fills a time-of-day structure at DS:DX and returns the
-   seconds field (BCD) in AL. */
-extern unsigned bdos(unsigned char func, unsigned dx);
-#pragma aux bdos =              \
-    "int 0E0h"                  \
-    parm [cl] [dx]              \
+/* RC759 50 Hz system tick: a monotonic 32-bit counter read a word at a time
+   from the emulated 80186 timer's I/O ports.  Reading the low word latches the
+   high word, so the pair forms a consistent 32-bit value.  IN AX,DX reads a
+   word from the port in DX. */
+extern unsigned tick_inpw(unsigned port);
+#pragma aux tick_inpw =         \
+    "in ax,dx"                  \
+    parm [dx]                   \
     value [ax]                  \
-    modify [ax bx cx dx es];
+    modify [ax];
 
-/* T_GET's structure: word date (day 1 == 1978-01-01), then hour and minute
-   as packed BCD; seconds (BCD) come back in AL. */
-struct stdcbench_tod {
-    unsigned      date;
-    unsigned char hour;
-    unsigned char minute;
-};
-
-static unsigned long stdcbench_bcd2bin(unsigned char b)
-{
-    return (unsigned long)((b >> 4) * 10 + (b & 0x0F));
-}
+#define TICK_PORT_LO 0xFE00u
+#define TICK_PORT_HI 0xFE02u
 
 /* --- Heap base fix for DR C on this hybrid Open-Watcom/DR-C link ---------
    DR C's heap pointer HP. is initialised (in m.init.heap) from the BSS word
@@ -55,15 +46,10 @@ static void stdcbench_init_heap(void)
 
 stdcbench_clock_t stdcbench_clock(void)
 {
-    struct stdcbench_tod tod;
-    unsigned char        seconds;
+    unsigned lo = tick_inpw(TICK_PORT_LO);   /* latches the high word */
+    unsigned hi = tick_inpw(TICK_PORT_HI);
 
-    seconds = (unsigned char)(bdos(105, (unsigned)&tod) & 0xFF);
-
-    return (stdcbench_clock_t)tod.date * 86400ul
-         + stdcbench_bcd2bin(tod.hour) * 3600ul
-         + stdcbench_bcd2bin(tod.minute) * 60ul
-         + stdcbench_bcd2bin(seconds);
+    return ((stdcbench_clock_t)hi << 16) | lo;
 }
 
 void stdcbench_error(const char *message)

@@ -16,9 +16,9 @@ integer modules (the float/double modules are excluded), links, and runs:
 
 ```
 stdcbench 0.8
-stdcbench c90base score: 8
+stdcbench c90base score: 7
 stdcbench c90lib score: 5
-stdcbench final score: 13
+stdcbench final score: 12
 ```
 
 The scores are **reproducible, real (emulated) timings** -- see the clock
@@ -112,31 +112,27 @@ more than the arena would grow past it. stdcbench never approaches this
 
 ## The clock
 
-`portme.c`'s `stdcbench_clock()` reads the emulator's Concurrent CP/M-86
-date/time clock (**T_GET**, BDOS function 105), so the benchmark measures
-genuine elapsed (emulated) time. That clock is deterministic (a real base
-date plus a virtual component proportional to the code the emulated 8086
-executes), so scores are **reproducible** and reflect how much work is done
-per emulated second. `STDCBENCH_CLOCKS_PER_SEC` is `1` because T_GET's
-resolution is one second.
+`portme.c`'s `stdcbench_clock()` reads the emulator's **RC759 50 Hz system
+tick** -- the emulated Intel 80186 timer, read through its I/O ports -- so the
+benchmark measures genuine elapsed (emulated) time at ~20 ms resolution. That
+tick is deterministic (a virtual clock proportional to the code the emulated
+8086 executes), so scores are **reproducible** and reflect how much work is
+done per tick. `STDCBENCH_CLOCKS_PER_SEC` is `50` to match the tick rate.
 
-One benchmark iteration is heavy, so the emulated CPU rate must be high
-enough that an iteration fits inside its module's timing window
-(`SECONDS` = 8 for c90base, 40 for c90lib); otherwise the single
-overshooting iteration makes the score-normalisation
-`iterations * (1000*SECONDS/(end-start)) / 100` underflow to `0`. The build
-script therefore runs `SCB.CMD` with `CPM86_CLOCK_HZ=700000`, which keeps
-each module at one (cheap) iteration while giving reproducible non-zero
-scores. Raising the rate lets modules run more iterations at the cost of
-proportionally more emulated work (watch the runner's instruction cap).
-Because the score is derived from `end-start` (an iteration's real emulated
-duration), it still scales with code efficiency.
+The finer tick replaces the earlier 1-second T_GET clock, whose coarse
+resolution made the score-normalisation fragile (a single overshooting
+iteration could underflow it to `0`). The emulated CPU rate must still be high
+enough that a heavy iteration fits its module's timing window (`SECONDS` = 8 for
+c90base, 40 for c90lib), so the build script runs `SCB.CMD` with
+`CPM86_CLOCK_HZ=700000`; the 50 Hz tick then resolves the `end-start` interval
+finely. The score scales with code efficiency, and the tick rate is tunable via
+`CPM86_TICK_HZ`.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `portme.c` / `portme.h` | entry point (`cmain`), real T_GET clock, heap-base fix, module selection |
+| `portme.c` / `portme.h` | entry point (`cmain`), RC759 50 Hz system-tick clock, heap-base fix, module selection |
 | `cpmlibc.c` | the ANSI routines DR C lacks (`mem*`, `strstr`, `strtol`, `ctype`) |
 | `inc/*.h` | neutral C90 headers matching DR C's small-model ABI |
 | `omf-delocal.py` | rewrites Watcom `LEXTDEF`/`LPUBDEF` so DR LINK-86 accepts the objects |

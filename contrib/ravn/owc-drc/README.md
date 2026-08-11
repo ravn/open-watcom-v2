@@ -102,16 +102,18 @@ of the DR C headers.
 
 ### The timer (`glue.c`)
 
-Dhrystone needs `time()` for its timing loop. Plain CP/M-86 has no time-of-day
-call, but Concurrent CP/M-86 adds **T_GET** (BDOS function 105), which the
-`cpm86run_unicorn` emulator implements. `glue.c`'s `time()` issues that call and
-returns whole seconds (T_GET's resolution is 1 second — there is no sub-second
-field). The emulator's clock is the real base date plus a deterministic virtual
-component (proportional to the code the emulated 8086 executes), so the reported
-Dhrystones/sec is **reproducible** and scales with code efficiency and the
-emulated CPU rate (`CPM86_CLOCK_HZ`). It is a consistent synthetic figure rather
-than a hardware measurement, but the benchmark genuinely measures elapsed time
-rather than counting a dummy tick.
+Dhrystone needs a clock for its timing loop. Plain CP/M-86 has none, and the
+Concurrent CP/M-86 **T_GET** call (BDOS 105) only resolves whole seconds — far
+too coarse to time short workloads on a 6 MHz 80186. The RC759 Piccoline drives
+its Intel 80186 timer at **50 Hz** (the PAL frame rate), and the
+`cpm86run_unicorn` emulator models that as a monotonic 50 Hz system tick read
+through the timer's I/O ports. `glue.c`'s `clock()` reads that tick (built via
+Dhrystone's `MSC_CLOCK` "hi-res clock" path with `CLK_TCK == 50`), giving ~20 ms
+resolution. The tick is a deterministic virtual clock (proportional to the code
+the emulated 8086 executes), so the reported Dhrystones/sec is **reproducible**
+and scales with code efficiency and the emulated CPU rate (`CPM86_CLOCK_HZ`,
+`CPM86_TICK_HZ`). `glue.c` also still provides a whole-second `time()` via T_GET
+for any code that wants wall-clock seconds.
 
 ## Why not use Watcom's own run-time?
 
@@ -147,7 +149,8 @@ using the bundled `diskdefs` format `drc-rc759`. A newer v1.11 image exists at
 | `owcrt.asm` | CP/M-86 entry object: `jmp _main` + `main → cmain` bridge, segment `CODE`/`CGROUP`. |
 | `compat.h` | Forced-include naming shim (`#pragma aux default "*";`). |
 | `hello.c` | printf smoke test (entry `cmain`). |
-| `glue.c` | Real `time()` via Concurrent CP/M-86 T_GET (BDOS 105), non-static global. |
+| `glue.c` | RC759 50 Hz system tick `clock()` (80186 timer I/O ports) + T_GET `time()`, non-static globals. |
+| `dhry-time.h` | Tiny `<time.h>` shim (`CLK_TCK`, `clock_t`) so unmodified Dhrystone builds with its `MSC_CLOCK` path. |
 | `diskdefs` | `cpmtools` format `drc-rc759` for the DDHF DR C floppy. |
 
 Downloaded and generated artifacts (`Digital-Research-C-May84.bin`, `drc/`,

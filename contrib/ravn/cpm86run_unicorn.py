@@ -11,10 +11,12 @@ This is a CPU + BDOS harness, not a full CP/M-86 machine: Unicorn provides the
 instruction set (incl. 80186+), and this file emulates the BDOS system calls a
 program makes. The console/string group is implemented, plus S_BDOSVER (12) and
 the Concurrent CP/M-86 date/time calls T_SET (104) / T_GET (105) -- so a stock
-DATE.CMD prints the correct date. All of this is a superset of plain CP/M-86,
-so ordinary CP/M-86 programs keep working. Every other function (disk/file, and
-the rest of the Concurrent CP/M API) raises a clear "unimplemented BDOS
-function" error, so unsupported programs fail loudly instead of silently.
+DATE.CMD prints the correct date -- and the RC759's 50 Hz 80186 system tick,
+read through the timer's I/O ports for ~20 ms benchmark timing. All of this is
+a superset of plain CP/M-86, so ordinary CP/M-86 programs keep working. Every
+other function (disk/file, and the rest of the Concurrent CP/M API) raises a
+clear "unimplemented BDOS function" error, so unsupported programs fail loudly
+instead of silently.
 
 Program load emulates the CCP: the memory model (8080 / small) is read from the
 .CMD group descriptors, groups are placed in memory, segment registers and the
@@ -27,11 +29,11 @@ import os
 import sys
 import datetime
 from unicorn import (Uc, UC_ARCH_X86, UC_MODE_16, UC_HOOK_INTR, UC_HOOK_CODE,
-                     UC_HOOK_BLOCK)
+                     UC_HOOK_BLOCK, UC_HOOK_INSN)
 from unicorn.x86_const import (
     UC_X86_REG_CS, UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_SS,
     UC_X86_REG_SP, UC_X86_REG_IP, UC_X86_REG_CX, UC_X86_REG_DX,
-    UC_X86_REG_AX, UC_X86_REG_BX,
+    UC_X86_REG_AX, UC_X86_REG_BX, UC_X86_INS_IN,
 )
 
 import bin2cmd
@@ -65,6 +67,22 @@ CLOCK_HZ = int(os.environ.get("CPM86_CLOCK_HZ", "20000"))
 
 # CP/M's date field is a day number with day 1 == 1 January 1978.
 CPM_DAY_ONE = datetime.date(1978, 1, 1)
+
+# --- RC759 50 Hz system tick ---------------------------------------------
+# The RC759 Piccoline drives an Intel 80186 timer interrupt at 50 Hz (the PAL
+# frame rate), and Concurrent CP/M-86's tick ISR keeps a monotonic tick count
+# from it.  T_GET only resolves whole seconds, which is far too coarse to time
+# short workloads on a 6 MHz 80186, so we model that finer counter here: a
+# 32-bit value advancing at TICK_HZ (default 50) of the same deterministic
+# virtual clock that drives T_GET, i.e. ~20 ms resolution.  It is read the way
+# a real 80186 timer is -- through I/O ports: IN AX,TICK_PORT_LO latches and
+# returns the low word, IN AX,TICK_PORT_HI returns the latched high word, so a
+# low-then-high read pair is atomic.  Being derived from the code-byte virtual
+# clock, tick *differences* (all a benchmark uses) stay host independent and
+# reproducible.  Tune the rate via CPM86_TICK_HZ.
+TICK_HZ = int(os.environ.get("CPM86_TICK_HZ", "50"))
+TICK_PORT_LO = 0xFE00
+TICK_PORT_HI = 0xFE02
 
 
 class Done(Exception):
@@ -212,7 +230,8 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False):
 
     out = bytearray()
     inp = bytearray(stdin_bytes)
-    state = {"error": None, "ticks": 0, "base_dt": _clock_base()}
+    state = {"error": None, "ticks": 0, "base_dt": _clock_base(),
+             "tick_hi_latch": 0}
 
     def set_al(val):
         ax = uc.reg_read(UC_X86_REG_AX) & 0xFF00
@@ -293,6 +312,20 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False):
         state["ticks"] += size
     uc.hook_add(UC_HOOK_BLOCK, hook_block)
 
+    # RC759 50 Hz system tick, read through the 80186 timer's I/O ports.  The
+    # counter is derived from the same virtual clock (code bytes / CLOCK_HZ)
+    # scaled to TICK_HZ, so it is deterministic.  Reading the low word latches
+    # the high word, making a low-then-high read pair a consistent 32-bit value.
+    def hook_in(uc, port, size, user_data):
+        ticks = state["ticks"] * TICK_HZ // CLOCK_HZ if CLOCK_HZ else 0
+        if port == TICK_PORT_LO:
+            state["tick_hi_latch"] = (ticks >> 16) & 0xFFFF
+            return ticks & 0xFFFF
+        if port == TICK_PORT_HI:
+            return state["tick_hi_latch"]
+        return 0
+    uc.hook_add(UC_HOOK_INSN, hook_in, None, 1, 0, UC_X86_INS_IN)
+
     insns = {"n": 0}
     if count_insns:
         def hook_code(uc, address, size, user_data):
@@ -307,8 +340,11 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False):
         raise state["error"]
     if os.environ.get("CPM86_DEBUG_CLOCK"):
         secs = state["ticks"] / CLOCK_HZ if CLOCK_HZ else 0
-        print("cpm86: code-bytes=%d CLOCK_HZ=%d emulated-seconds=%.3f"
-              % (state["ticks"], CLOCK_HZ, secs), file=sys.stderr)
+        sys_ticks = state["ticks"] * TICK_HZ // CLOCK_HZ if CLOCK_HZ else 0
+        print("cpm86: code-bytes=%d CLOCK_HZ=%d emulated-seconds=%.3f "
+              "TICK_HZ=%d sys-ticks=%d"
+              % (state["ticks"], CLOCK_HZ, secs, TICK_HZ, sys_ticks),
+              file=sys.stderr)
     text = out.decode("cp437", errors="replace")
     if count_insns:
         return text, insns["n"]

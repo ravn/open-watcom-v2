@@ -85,12 +85,17 @@ dhry)
     cp "$DHRY/dhry_2.c" DHRY_2.C
     cp "$DHRY/dhry.h"   dhry.h
     cp "$HERE/glue.c" GLUE.C
-    # -DTIME selects the time()-based timing path; glue.c's time() reads the
-    # emulator's Concurrent CP/M-86 T_GET (BDOS 105) clock (1-second resolution);
+    # dhry-time.h is a tiny <time.h> shim (CLK_TCK, clock_t) so the unmodified
+    # Dhrystone builds with its MSC_CLOCK "hi-res clock" path; -i. then resolves
+    # <time.h> to it in this work dir.
+    cp "$HERE/dhry-time.h" time.h
+    # -DMSC_CLOCK selects the clock()-based timing path (HZ == CLK_TCK == 50);
+    # glue.c's clock() reads the emulator's RC759 50 Hz system tick (the 80186
+    # timer, ~20 ms resolution) via its I/O ports;
     # -Dmain=cmain avoids Open Watcom's special-casing of the name "main";
-    # -i. finds the DR C headers copied into this work dir.
+    # -i. finds the DR C headers (and the time.h shim) copied into this work dir.
     for u in DHRY_1 DHRY_2; do
-        "$BIN/bwcc" $CFLAGS -DTIME -Dmain=cmain -i. "$u.C" -fo="$u.OBJ" >/dev/null 2>&1
+        "$BIN/bwcc" $CFLAGS -DMSC_CLOCK -Dmain=cmain -i. "$u.C" -fo="$u.OBJ" >/dev/null 2>&1
     done
     "$BIN/bwcc" $CFLAGS GLUE.C -fo=GLUE.OBJ >/dev/null
     link DHRY "OWCRT,DHRY_1,DHRY_2,GLUE"

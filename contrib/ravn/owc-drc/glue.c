@@ -2,20 +2,44 @@
  * glue.c -- minimal platform glue for benchmarks built against DR C on
  * CP/M-86 under the cpm86run_unicorn emulator.
  *
- * Dhrystone (and similar) need a time() for their timing loop.  Plain
- * CP/M-86 has no time-of-day call, but Concurrent CP/M-86 adds T_GET
- * (BDOS function 105), which our emulator implements: it returns the real
- * base date/time plus a deterministic virtual clock (proportional to the
- * code the emulated 8086 executes).  So time() below reports genuine,
- * monotonic, reproducible elapsed seconds -- the benchmark now measures
- * (emulated) time instead of a dummy counter.  The absolute Dhrystones/sec
- * depends on the emulator's clock rate (CPM86_CLOCK_HZ), so it is a
- * consistent synthetic figure rather than a hardware measurement, but it
- * scales correctly with code efficiency and the number of runs.
+ * Dhrystone's timing loop needs a clock.  Plain CP/M-86 has none, but the
+ * emulator models the RC759 Piccoline's Intel 80186 timer as a monotonic
+ * 50 Hz system tick, readable through I/O ports (see cpm86run_unicorn.py).
+ * clock() below reports that tick, so Dhrystone measures genuine, monotonic,
+ * reproducible elapsed (emulated) time at ~20 ms resolution -- far finer than
+ * the 1-second T_GET clock.  Built with dhry.h's MSC_CLOCK "hi-res clock"
+ * path and CLK_TCK == 50 (from the local time.h shim); the absolute
+ * Dhrystones/sec depends on the emulator's clock rate (CPM86_CLOCK_HZ), so it
+ * is a consistent synthetic figure that scales correctly with code efficiency.
+ *
+ * time() is also provided (via Concurrent CP/M-86 T_GET, BDOS 105) for any DR
+ * C code that wants wall-clock seconds; Dhrystone itself uses clock().
  *
  * Declared with no leading underscore (compat.h) so DR C code that calls
- * time() links against this definition.
+ * these links against the definitions here.
  */
+
+/* RC759 50 Hz system tick: a monotonic 32-bit counter read a word at a time
+ * from the emulated 80186 timer's I/O ports.  Reading the low word latches the
+ * high word, so the pair forms a consistent 32-bit value.  IN AX,DX reads a
+ * word from the port in DX. */
+extern unsigned tick_inpw( unsigned port );
+#pragma aux tick_inpw =         \
+    "in ax,dx"                  \
+    parm [dx]                   \
+    value [ax]                  \
+    modify [ax];
+
+#define TICK_PORT_LO 0xFE00u
+#define TICK_PORT_HI 0xFE02u
+
+long clock( void )
+{
+    unsigned lo = tick_inpw( TICK_PORT_LO );   /* latches the high word */
+    unsigned hi = tick_inpw( TICK_PORT_HI );
+
+    return (long)( ( (unsigned long)hi << 16 ) | lo );
+}
 
 /* CP/M-86 BDOS entry: CL = function, DX = parameter, result in AX.  T_GET
  * (function 105) fills a time-of-day structure at DS:DX and returns the
