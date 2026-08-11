@@ -89,16 +89,21 @@ dhry)
     # Dhrystone builds with its MSC_CLOCK "hi-res clock" path; -i. then resolves
     # <time.h> to it in this work dir.
     cp "$HERE/dhry-time.h" time.h
-    # -DMSC_CLOCK selects the clock()-based timing path (HZ == CLK_TCK == 50);
-    # glue.c's clock() reads the emulator's RC759 50 Hz system tick (the 80186
-    # timer, ~20 ms resolution) via its I/O ports;
+    # -DMSC_CLOCK selects the clock()-based timing path (HZ == CLK_TCK == 1000);
+    # glue.c's clock() reads the RC759 XIOS "16 ms counter" (Int 28h function 19)
+    # and returns milliseconds (16 ms resolution);
     # -Dmain=cmain avoids Open Watcom's special-casing of the name "main";
     # -i. finds the DR C headers (and the time.h shim) copied into this work dir.
     for u in DHRY_1 DHRY_2; do
         "$BIN/bwcc" $CFLAGS -DMSC_CLOCK -Dmain=cmain -i. "$u.C" -fo="$u.OBJ" >/dev/null 2>&1
     done
     "$BIN/bwcc" $CFLAGS GLUE.C -fo=GLUE.OBJ >/dev/null
-    link DHRY "OWCRT,DHRY_1,DHRY_2,GLUE"
+    # owmath.asm supplies Watcom's 32-bit long helpers (__U4M/__I4M/__U4D) that
+    # DR C lacks; glue.c's clock()/time() do 32-bit multiplies, so the dhry link
+    # needs them too (as the stdcbench link does).
+    cp "$HERE/stdcbench/owmath.asm" owmath.asm
+    "$BIN/bwasm" -0 -ms owmath.asm -fo=OWMATH.OBJ >/dev/null
+    link DHRY "OWCRT,DHRY_1,DHRY_2,GLUE,OWMATH"
     cp DHRY.CMD "$HERE/DHRY.CMD"
     echo "== running DHRY.CMD (50 runs) =="
     printf '50\n' | python3 "$RUNNER" "$HERE/DHRY.CMD"
@@ -163,8 +168,8 @@ c90lib-peep-stm8.c c90lib-htab.c stdcbench.c"
     link SCB "$objs"
     cp SCB.CMD "$HERE/SCB.CMD"
     echo "== running SCB.CMD =="
-    # stdcbench times itself with the emulator's Concurrent CP/M-86 T_GET clock
-    # (1-second resolution).  One benchmark iteration is heavy, so the emulated
+    # stdcbench times itself with the emulator's RC759 XIOS 16 ms counter
+    # (Int 28h function 19).  One benchmark iteration is heavy, so the emulated
     # CPU rate must be high enough that an iteration fits inside the module's
     # timing window (8 s / 40 s); otherwise the single overshooting iteration
     # makes the score-normalisation underflow to 0.  700000 keeps each module at

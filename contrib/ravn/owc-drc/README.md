@@ -103,17 +103,21 @@ of the DR C headers.
 ### The timer (`glue.c`)
 
 Dhrystone needs a clock for its timing loop. Plain CP/M-86 has none, and the
-Concurrent CP/M-86 **T_GET** call (BDOS 105) only resolves whole seconds — far
-too coarse to time short workloads on a 6 MHz 80186. The RC759 Piccoline drives
-its Intel 80186 timer at **50 Hz** (the PAL frame rate), and the
-`cpm86run_unicorn` emulator models that as a monotonic 50 Hz system tick read
-through the timer's I/O ports. `glue.c`'s `clock()` reads that tick (built via
-Dhrystone's `MSC_CLOCK` "hi-res clock" path with `CLK_TCK == 50`), giving ~20 ms
-resolution. The tick is a deterministic virtual clock (proportional to the code
-the emulated 8086 executes), so the reported Dhrystones/sec is **reproducible**
-and scales with code efficiency and the emulated CPU rate (`CPM86_CLOCK_HZ`,
-`CPM86_TICK_HZ`). `glue.c` also still provides a whole-second `time()` via T_GET
-for any code that wants wall-clock seconds.
+Concurrent CP/M-86 **T_GET** call (BDOS 105) only resolves whole seconds. The
+RC759's own on-chip 80186 timers are wired to sound/cassette, not timekeeping
+(PICCOLINE Programmer's Guide §2.3); for fine relative timing the machine
+provides an XIOS **"16 ms counter"** via **Int 28h function 19** (Programmer's
+Guide App. A): it returns a 32-bit second count plus the elapsed 16 ms periods
+of the current second, i.e. **16 ms resolution**. The `cpm86run_unicorn`
+emulator models that call, and `glue.c`'s `clock()` reads it (built via
+Dhrystone's `MSC_CLOCK` "hi-res clock" path with `CLK_TCK == 1000`, returning
+milliseconds). The counter is a deterministic virtual clock (proportional to
+the code the emulated 8086 executes), so the reported Dhrystones/sec is
+**reproducible** and scales with code efficiency and the emulated CPU rate
+(`CPM86_CLOCK_HZ`). `glue.c` also still provides a whole-second `time()` via
+T_GET for any code that wants wall-clock seconds. The link includes
+`owmath.asm` because the millisecond arithmetic needs Watcom's 32-bit long
+helpers, which DR C lacks.
 
 ## Why not use Watcom's own run-time?
 
@@ -149,8 +153,8 @@ using the bundled `diskdefs` format `drc-rc759`. A newer v1.11 image exists at
 | `owcrt.asm` | CP/M-86 entry object: `jmp _main` + `main → cmain` bridge, segment `CODE`/`CGROUP`. |
 | `compat.h` | Forced-include naming shim (`#pragma aux default "*";`). |
 | `hello.c` | printf smoke test (entry `cmain`). |
-| `glue.c` | RC759 50 Hz system tick `clock()` (80186 timer I/O ports) + T_GET `time()`, non-static globals. |
-| `dhry-time.h` | Tiny `<time.h>` shim (`CLK_TCK`, `clock_t`) so unmodified Dhrystone builds with its `MSC_CLOCK` path. |
+| `glue.c` | RC759 XIOS 16 ms `clock()` (Int 28h fn 19) + T_GET `time()`, non-static globals. |
+| `dhry-time.h` | Tiny `<time.h>` shim (`CLK_TCK`=1000, `clock_t`) so unmodified Dhrystone builds with its `MSC_CLOCK` path. |
 | `diskdefs` | `cpmtools` format `drc-rc759` for the DDHF DR C floppy. |
 
 Downloaded and generated artifacts (`Digital-Research-C-May84.bin`, `drc/`,

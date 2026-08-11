@@ -2,15 +2,17 @@
  * glue.c -- minimal platform glue for benchmarks built against DR C on
  * CP/M-86 under the cpm86run_unicorn emulator.
  *
- * Dhrystone's timing loop needs a clock.  Plain CP/M-86 has none, but the
- * emulator models the RC759 Piccoline's Intel 80186 timer as a monotonic
- * 50 Hz system tick, readable through I/O ports (see cpm86run_unicorn.py).
- * clock() below reports that tick, so Dhrystone measures genuine, monotonic,
- * reproducible elapsed (emulated) time at ~20 ms resolution -- far finer than
- * the 1-second T_GET clock.  Built with dhry.h's MSC_CLOCK "hi-res clock"
- * path and CLK_TCK == 50 (from the local time.h shim); the absolute
- * Dhrystones/sec depends on the emulator's clock rate (CPM86_CLOCK_HZ), so it
- * is a consistent synthetic figure that scales correctly with code efficiency.
+ * Dhrystone's timing loop needs a clock.  Plain CP/M-86 has none; the RC759
+ * Piccoline offers a one-second real-time clock (read via Concurrent CP/M-86
+ * T_GET) and, for finer relative timing, the XIOS "16 ms counter" reached
+ * through Int 28h function 19 (PICCOLINE Programmer's Guide, App. A).  The
+ * emulator models that call, so clock() below reports genuine, monotonic,
+ * reproducible elapsed (emulated) time in milliseconds at 16 ms resolution --
+ * the finest a real RC759 program can obtain.  Built with dhry.h's MSC_CLOCK
+ * "hi-res clock" path and CLK_TCK == 1000 (from the local time.h shim); the
+ * absolute Dhrystones/sec depends on the emulator's clock rate
+ * (CPM86_CLOCK_HZ), so it is a consistent synthetic figure that scales
+ * correctly with code efficiency.
  *
  * time() is also provided (via Concurrent CP/M-86 T_GET, BDOS 105) for any DR
  * C code that wants wall-clock seconds; Dhrystone itself uses clock().
@@ -19,26 +21,32 @@
  * these links against the definitions here.
  */
 
-/* RC759 50 Hz system tick: a monotonic 32-bit counter read a word at a time
- * from the emulated 80186 timer's I/O ports.  Reading the low word latches the
- * high word, so the pair forms a consistent 32-bit value.  IN AX,DX reads a
- * word from the port in DX. */
-extern unsigned tick_inpw( unsigned port );
-#pragma aux tick_inpw =         \
-    "in ax,dx"                  \
-    parm [dx]                   \
-    value [ax]                  \
-    modify [ax];
+/* RC759 XIOS Int 28h function 19 ("Returns 16 ms counter"): on entry AL = 19;
+ * on return DX:AX = seconds since boot and CX = elapsed 16 ms periods of the
+ * current second.  We copy the three words into a struct via BX (small model:
+ * DS-relative). */
+struct xios_tick { unsigned lo, hi, per; };
+extern void xios_tick16( struct xios_tick *t );
+#pragma aux xios_tick16 =       \
+    "mov al,19"                 \
+    "int 28h"                   \
+    "mov [bx],ax"               \
+    "mov [bx+2],dx"             \
+    "mov [bx+4],cx"             \
+    parm [bx]                   \
+    modify [ax cx dx];
 
-#define TICK_PORT_LO 0xFE00u
-#define TICK_PORT_HI 0xFE02u
+#define XIOS_TICK_MS 16u
 
 long clock( void )
 {
-    unsigned lo = tick_inpw( TICK_PORT_LO );   /* latches the high word */
-    unsigned hi = tick_inpw( TICK_PORT_HI );
+    struct xios_tick t;
+    unsigned long    secs;
 
-    return (long)( ( (unsigned long)hi << 16 ) | lo );
+    xios_tick16( &t );
+    secs = ( (unsigned long)t.hi << 16 ) | t.lo;
+
+    return (long)( secs * 1000ul + (unsigned long)t.per * XIOS_TICK_MS );
 }
 
 /* CP/M-86 BDOS entry: CL = function, DX = parameter, result in AX.  T_GET

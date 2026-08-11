@@ -112,27 +112,28 @@ more than the arena would grow past it. stdcbench never approaches this
 
 ## The clock
 
-`portme.c`'s `stdcbench_clock()` reads the emulator's **RC759 50 Hz system
-tick** -- the emulated Intel 80186 timer, read through its I/O ports -- so the
-benchmark measures genuine elapsed (emulated) time at ~20 ms resolution. That
-tick is deterministic (a virtual clock proportional to the code the emulated
-8086 executes), so scores are **reproducible** and reflect how much work is
-done per tick. `STDCBENCH_CLOCKS_PER_SEC` is `50` to match the tick rate.
+`portme.c`'s `stdcbench_clock()` reads the RC759 XIOS **"16 ms counter"**
+(**Int 28h function 19**, per the PICCOLINE Programmer's Guide App. A) -- the
+machine's documented fine relative-time source -- so the benchmark measures
+genuine elapsed (emulated) time at **16 ms resolution**. The call returns a
+32-bit second count plus the elapsed 16 ms periods of the current second; we
+express it in milliseconds, so `STDCBENCH_CLOCKS_PER_SEC` is `1000`. The
+counter is deterministic (a virtual clock proportional to the code the emulated
+8086 executes), so scores are **reproducible**.
 
-The finer tick replaces the earlier 1-second T_GET clock, whose coarse
+The 16 ms tick replaces the earlier 1-second T_GET clock, whose coarse
 resolution made the score-normalisation fragile (a single overshooting
 iteration could underflow it to `0`). The emulated CPU rate must still be high
 enough that a heavy iteration fits its module's timing window (`SECONDS` = 8 for
 c90base, 40 for c90lib), so the build script runs `SCB.CMD` with
-`CPM86_CLOCK_HZ=700000`; the 50 Hz tick then resolves the `end-start` interval
-finely. The score scales with code efficiency, and the tick rate is tunable via
-`CPM86_TICK_HZ`.
+`CPM86_CLOCK_HZ=700000`; the 16 ms tick then resolves the `end-start` interval
+finely. The score scales with code efficiency.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `portme.c` / `portme.h` | entry point (`cmain`), RC759 50 Hz system-tick clock, heap-base fix, module selection |
+| `portme.c` / `portme.h` | entry point (`cmain`), RC759 XIOS 16 ms clock (Int 28h fn 19), heap-base fix, module selection |
 | `cpmlibc.c` | the ANSI routines DR C lacks (`mem*`, `strstr`, `strtol`, `ctype`) |
 | `inc/*.h` | neutral C90 headers matching DR C's small-model ABI |
 | `omf-delocal.py` | rewrites Watcom `LEXTDEF`/`LPUBDEF` so DR LINK-86 accepts the objects |

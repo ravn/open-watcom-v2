@@ -3,27 +3,31 @@
    Entry point is cmain (owcrt.asm bridges DR C's "main" to it, because Open
    Watcom special-cases the name "main").  See ../README.md.
 
-   stdcbench_clock() reads the emulator's RC759 50 Hz system tick through the
-   80186 timer's I/O ports, so the benchmark measures genuine elapsed
-   (emulated) time at ~20 ms resolution.  The tick is deterministic (host
-   independent), so scores are reproducible and reflect how much work the
-   emulated 8086 completes per tick -- see STDCBENCH_CLOCKS_PER_SEC = 50. */
+   stdcbench_clock() reads the RC759 XIOS "16 ms counter" (Int 28h function 19,
+   per the PICCOLINE Programmer's Guide), the machine's documented fine
+   relative-time source, so the benchmark measures genuine elapsed (emulated)
+   time at 16 ms resolution.  The counter is deterministic (host independent),
+   so scores are reproducible.  We express it in milliseconds, hence
+   STDCBENCH_CLOCKS_PER_SEC = 1000 (values step by 16). */
 #include <stdio.h>
 #include "stdcbench.h"
 
-/* RC759 50 Hz system tick: a monotonic 32-bit counter read a word at a time
-   from the emulated 80186 timer's I/O ports.  Reading the low word latches the
-   high word, so the pair forms a consistent 32-bit value.  IN AX,DX reads a
-   word from the port in DX. */
-extern unsigned tick_inpw(unsigned port);
-#pragma aux tick_inpw =         \
-    "in ax,dx"                  \
-    parm [dx]                   \
-    value [ax]                  \
-    modify [ax];
+/* RC759 XIOS Int 28h function 19 ("Returns 16 ms counter"): on entry AL = 19;
+   on return DX:AX = seconds since boot and CX = elapsed 16 ms periods of the
+   current second.  We copy the three words into a struct via BX (small model:
+   DS-relative). */
+struct xios_tick { unsigned lo, hi, per; };
+extern void xios_tick16(struct xios_tick *t);
+#pragma aux xios_tick16 =       \
+    "mov al,19"                 \
+    "int 28h"                   \
+    "mov [bx],ax"               \
+    "mov [bx+2],dx"             \
+    "mov [bx+4],cx"             \
+    parm [bx]                   \
+    modify [ax cx dx];
 
-#define TICK_PORT_LO 0xFE00u
-#define TICK_PORT_HI 0xFE02u
+#define XIOS_TICK_MS 16u
 
 /* --- Heap base fix for DR C on this hybrid Open-Watcom/DR-C link ---------
    DR C's heap pointer HP. is initialised (in m.init.heap) from the BSS word
@@ -46,10 +50,13 @@ static void stdcbench_init_heap(void)
 
 stdcbench_clock_t stdcbench_clock(void)
 {
-    unsigned lo = tick_inpw(TICK_PORT_LO);   /* latches the high word */
-    unsigned hi = tick_inpw(TICK_PORT_HI);
+    struct xios_tick t;
+    unsigned long    secs;
 
-    return ((stdcbench_clock_t)hi << 16) | lo;
+    xios_tick16(&t);
+    secs = ((unsigned long)t.hi << 16) | t.lo;
+
+    return secs * 1000ul + (unsigned long)t.per * XIOS_TICK_MS;
 }
 
 void stdcbench_error(const char *message)
