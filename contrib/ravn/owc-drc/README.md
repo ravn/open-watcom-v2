@@ -100,6 +100,28 @@ So on this benchmark full optimisation buys ~33 % fewer clocks than DR C, and
 switching user-space calls from the stack to registers saves a further ~5 %.
 Reproduce with `./bench.sh` (or `./bench.sh --mhz 8` for a different clock).
 
+#### Where the O3→mixed gain comes from
+
+A dynamic per-mnemonic profile of the two builds (same input) shows the whole
+~104,540-clock saving is **function-call overhead** — the register convention
+removes the argument marshalling around each call, not the loop body itself:
+
+| mnemonic | Δ instructions | Δ clocks | what it is |
+|----------|---------------:|---------:|------------|
+| `push` | −4,397 | −49,970 | arguments no longer pushed on the stack before each call |
+| `mov`  | −3,800 | −48,200 | arguments no longer copied to/from stack slots |
+| `add`  | −2,800 |  −8,400 | caller's `add sp,N` cleanup after each cdecl call |
+| `cmp`/`inc` | 0 | −5,200 | a few operands now register- instead of memory-form |
+| `pop`/`jmp`/`lea` | +806 | +8,430 | minor work the register convention shifts around |
+
+`push` + `mov` alone are ~94 % of the saving. The gain is only ~5 % because
+Dhrystone's actual work — `strcpy`/`strcmp`, array indexing in `Proc_8`, struct
+handling — dominates and is untouched by the calling convention, and calls into
+the DR C library (`printf`, `strcpy`, …) still go through the stack in **both**
+builds. The register trick pays off in proportion to how call-heavy (rather than
+loop-heavy) the program is; a compute-bound kernel with few calls would see even
+less, while a call-heavy one would see more.
+
 ## How Watcom is made compatible with DR C — the facts (all verified)
 
 ### 1. Object format: Watcom OMF links with DR LINK-86 as-is
