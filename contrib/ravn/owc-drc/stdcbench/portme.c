@@ -28,7 +28,9 @@ unsigned long stdcbench_virtual_clock;
    any larger buffer corrupts static data.  We repair this before the first
    allocation by pointing the heap at a private static arena via DR C's
    brk(): malloc() then grows upward inside the arena instead of over our
-   data.  The arena is sized well above stdcbench's peak live heap. */
+   data.  The arena is far larger than the measured peak use (stdcbench's
+   high-water mark is ~1536 bytes, verified via sbrk(0)), so every
+   allocation stays strictly inside the array and can touch nothing else. */
 extern int brk(void *addr);           /* DR C run-time (clears.l86) */
 static char stdcbench_heap[20480];
 

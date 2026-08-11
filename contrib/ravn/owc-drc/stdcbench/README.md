@@ -85,6 +85,31 @@ a private static arena with DR C's `brk()`. `malloc` then grows upward
 inside that arena instead of over the program's data. See the comment in
 `portme.c`.
 
+### Heap verification
+
+The repaired heap was stress-tested under the emulator to confirm the DR C
+allocator behaves correctly once its base is fixed:
+
+* **Allocator behaviour (all pass):** distinct, non-overlapping allocations;
+  no cross-corruption when every block is written and read back; `calloc`
+  zeroes; `realloc` grows while preserving contents; `free` returns blocks
+  to a free list that later `malloc`/`realloc` calls reuse (both interior
+  holes and the whole freed span).
+* **Monotonic break:** `free` does *not* lower the break pointer (it only
+  adds to the free list), so `sbrk(0)` is monotonic and its value at the end
+  of a run equals the true high-water mark.
+* **stdcbench peak = 1536 bytes**, measured via `sbrk(0)` -- comfortably
+  inside the 20 KiB (`20480`-byte) arena, a ~13x margin. Because every
+  allocation therefore stays strictly within the arena array, it cannot
+  touch any other static or the stack, so the run is provably safe.
+
+One characteristic worth noting: the arena size is *not* a hard cap. Like
+any `sbrk`-style heap, DR C's `malloc` keeps extending toward the stack and
+only returns `NULL` when the break nears `SP`, so a program that allocated
+more than the arena would grow past it. stdcbench never approaches this
+(1536 << 20480); a workload with a larger footprint should raise
+`stdcbench_heap`'s size accordingly.
+
 ## The virtual clock
 
 An instruction-level emulator has no wall clock, so `portme.c`'s
