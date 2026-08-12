@@ -7,6 +7,7 @@
 # Targets:
 #   ./build-owc-drc.sh            build+run the hello smoke test
 #   ./build-owc-drc.sh mandel     build+run the fixed-point Mandelbrot kernel
+#   ./build-owc-drc.sh mandel-ow  build+run the OW-specific IMUL Mandelbrot
 #   ./build-owc-drc.sh dhry       fetch, build+run unmodified Dhrystone 2.1
 #
 # Prerequisites:
@@ -126,6 +127,24 @@ mandel)
     echo "== running MANDEL.CMD =="
     python3 "$RUNNER" "$HERE/MANDEL.CMD"
     ;;
+mandel-ow)
+    # Open-Watcom-SPECIFIC Mandelbrot (owc-drc/mandel-ow.c): identical output to
+    # the mandel target, but FP_MUL is a #pragma aux routine lowering to a single
+    # 16x16 IMUL + byte-extract instead of the portable (long)a*b>>8 idiom, which
+    # Open Watcom compiles to a 32x32 __I4M call + carry-chained shift loop.  ~4.6x
+    # fewer clocks; needs NO owmath (no __I4M).  Its output stays byte-identical to
+    # the DR C oracle (the transform is exact), but it deliberately breaks the
+    # "one source, both compilers" design -- DR C v1.11 cannot express inline IMUL
+    # -- so it is NOT built by the pure-drc pipeline.
+    cp "$HERE/mandel-ow.c" MOW.C
+    cp "$HERE/putchar.asm" putchar.asm
+    "$BIN/bwasm" -0 -ms putchar.asm -fo=PUTCHAR.OBJ >/dev/null
+    "$BIN/bwcc" $CFLAGS -Dmain=cmain MOW.C -fo=MOW.OBJ >/dev/null
+    link MOW "OWCRT,MOW,PUTCHAR"
+    cp MOW.CMD "$HERE/MANDEL-OWIMUL.CMD"
+    echo "== running MANDEL-OWIMUL.CMD =="
+    python3 "$RUNNER" "$HERE/MANDEL-OWIMUL.CMD"
+    ;;
 stdcbench)
     # Build stdcbench 0.8 (Philipp Klaus Krause) -- the c90base + c90lib
     # integer benchmark modules -- on Open Watcom C + DR C.  Float/double
@@ -195,5 +214,5 @@ c90lib-peep-stm8.c c90lib-htab.c stdcbench.c"
     CPM86_CLOCK_HZ="${CPM86_CLOCK_HZ:-700000}" python3 "$RUNNER" "$HERE/SCB.CMD"
     ;;
 *)
-    echo "usage: $0 [hello|mandel|dhry|stdcbench]" >&2; exit 2;;
+    echo "usage: $0 [hello|mandel|mandel-ow|dhry|stdcbench]" >&2; exit 2;;
 esac

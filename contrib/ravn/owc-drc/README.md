@@ -126,38 +126,67 @@ less, while a call-heavy one would see more.
 
 `mandel.c` is the compute-bound counterpart to Dhrystone: an 80×25 ASCII
 Mandelbrot set in fixed-point 8.8 arithmetic (`FP_MUL(a,b) = (int)((long)a*b>>8)`,
-30 iterations/cell), ported verbatim from the llvm-z80 test-gen example
+30 iterations/cell), ported from the llvm-z80 test-gen example
 `z80-utils/test-gen/examples/mandelbrot.c`. Output is deterministic — 25 lines ×
 80 columns, no timing, no input — so every build must reproduce the DR C oracle
 byte-for-byte. The only I/O primitive is the shared `putchar.asm` (BDOS
-function 2, `C_WRITE`), identical in all four builds, so the measured work is the
+function 2, `C_WRITE`), identical in all builds, so the measured work is the
 fixed-point loop rather than two different libc stdout paths. Reproduce with
 `./bench-mandel.sh` (or `DRC_HOME=… ./bench-mandel.sh` to rebuild the oracle).
+
+**Fixed-point mapping caveat (a real bug that was here).** The pixel→plane
+mapping must be `cr = -512 + px*8`, *not* the tidier-looking `-512 + px*640/80`:
+the literal `px*640` reaches 50560 at `px=79`, overflowing 16-bit `int` (`>32767`
+from `px=52` on) and wrapping negative, which turns the right third of the
+picture into blank space. The llvm-z80 test-gen source carried this overflow —
+it descends from the RC700 benchmark `z88dk/examples/rc700/mandelbrot.c`, whose
+mapping is done through a `(long)` intermediate *specifically to avoid overflow*,
+and the cast was dropped in the port. On the RC700 the optimising compiler hides
+it (signed overflow is UB, so `(px*640)/80` may be strength-reduced to `px*8`),
+but DR C 1984 and Open Watcom compute it literally and both render the broken
+picture *byte-identically* — a reminder that "all builds agree" proves compiler
+equivalence, not correctness. `px*640/25` for `ci` does not overflow (`py≤24`),
+and `640/25` is not integral, so `ci` keeps the divide.
 
 Mandelbrot, estimated 80186 clocks @ 6 MHz (all **MATCH** the DR C oracle output):
 
 | build | size (B) | instructions | ~80186 clocks | ~ms @6 MHz | vs DR C |
 |-------|---------:|-------------:|--------------:|-----------:|--------:|
-| **DR C** (oracle/baseline) | 14,208 | 2,956,266 | 26,780,030 | 4463.3 | 1.00× |
-| Open Watcom **O0** (`-ecc -od`) | 14,336 | 2,512,894 | 17,367,401 | 2894.6 | 0.65× |
-| Open Watcom **O3** (`-ecc -ox`) | 14,208 | 1,990,964 | 15,131,046 | 2521.8 | **0.57×** |
-| Open Watcom **mixed** (`-ox`, register) | 14,208 | 1,990,970 | 15,131,106 | 2521.9 | 0.57× |
+| **DR C** (oracle/baseline) | 14,208 | 5,538,255 | 49,957,263 | 8326.2 | 1.00× |
+| Open Watcom **O0** (`-ecc -od`) | 14,336 | 4,714,979 | 31,997,282 | 5332.9 | 0.64× |
+| Open Watcom **O3** (`-ecc -ox`) | 14,208 | 3,725,230 | 28,033,978 | 4672.3 | 0.56× |
+| Open Watcom **mixed** (`-ox`, register) | 14,208 | 3,725,236 | 28,034,038 | 4672.3 | 0.56× |
+| Open Watcom **IMUL** (`mandel-ow.c`, OW-only) | 14,080 | 778,304 | 6,051,256 | 1008.5 | **0.12×** |
 
-Two things stand out against the Dhrystone table:
+Four things stand out against the Dhrystone table:
 
-1. **The optimiser gap is bigger** — O3 is **0.57×** the DR C clocks here (−43 %)
+1. **The optimiser gap is bigger** — O3 is **0.56×** the DR C clocks here (−44 %)
    versus 0.67× (−33 %) on Dhrystone. A tight arithmetic kernel is exactly where
    Open Watcom's expression/loop optimisation and its inline long-multiply beat
    DR C's straightforward 1984 code generation; there is no `strcpy`/struct work
    to dilute the win.
 
-2. **O3 and mixed are identical** (15,131,046 vs 15,131,106 clocks — a 60-clock,
-   0.0004 % difference). This is the case the Dhrystone write-up predicted: a
+2. **O3 and mixed are identical** (28,033,978 vs 28,034,038 clocks — a 60-clock,
+   0.0002 % difference). This is the case the Dhrystone write-up predicted: a
    compute-bound kernel with **no user↔user calls** (everything is inlined in
    `main`; the only call is the cdecl `putchar`) gives the register-calling
    convention nothing to optimise. The `mixed` trick helps in proportion to how
    call-heavy a program is, and Mandelbrot is the opposite extreme from a
    call-heavy one.
+
+3. **The portable fixed-point idiom leaves ~4.6× on the table.** All three
+   portable builds compile `FP_MUL(a,b) = (int)((long)a*b>>8)` to a 32×32
+   `__I4M` library call plus an 8-step carry-chained `>>8` shift loop, three
+   times per iteration — because C integer promotion widens both operands to
+   `long` and Open Watcom (even at `-ox`) does not prove they came from 16-bit
+   `int`s. `mandel-ow.c` is an **Open-Watcom-specific** variant whose `FP_MUL`
+   is a `#pragma aux` routine — one 16×16 `IMUL` (whose `DX:AX` product is the
+   full 32 bits) plus a two-instruction byte extract of bits [8..23]. It is
+   exact (the low 16 bits of an arithmetic and a logical `>>8` are identical),
+   so it reproduces the DR C oracle byte-for-byte, and runs in **0.12×** the DR C
+   clocks — about **4.6× faster than portable O3**. It deliberately breaks the
+   "one source, both compilers" oracle (DR C v1.11 cannot express inline `IMUL`),
+   so it is not built by the `pure-drc` pipeline.
 
 Size is ~14 KB for every build because the `.CMD` is dominated by the linked
 DR C run-time (`clears.l86`), not the few hundred bytes of kernel code.

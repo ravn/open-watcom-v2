@@ -33,8 +33,15 @@ int main()              /* K&R definition: no (void) prototype in DR C v1.11.
     for (py = 0; py < 25; py++) {
         for (px = 0; px < 80; px++) {
             /* Map pixel to the complex plane:
-               x in [-2.0, +0.5], y in [-1.25, +1.25], both in 8.8. */
-            int cr = -512 + (px * 640 / 80);
+               x in [-2.0, +0.5], y in [-1.25, +1.25], both in 8.8.
+               cr uses px*8 (== px*640/80): the literal px*640 reaches 50560 at
+               px=79, which overflows 16-bit int (>32767 from px=52 on) and
+               wraps negative, corrupting the right third of the picture -- the
+               llvm-z80 test-gen port introduced this by dropping the RC700
+               original's overflow-safe (long) mapping.  py*640 (max 15360 at
+               py=24) does NOT overflow, and 640/25 isn't integral, so ci keeps
+               the divide. */
+            int cr = -512 + px * 8;
             int ci = -320 + (py * 640 / 25);
             int zr = 0, zi = 0;
             int iter;

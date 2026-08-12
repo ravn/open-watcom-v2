@@ -94,6 +94,31 @@ echo "Building Watcom variants of the Mandelbrot kernel from owc-drc/mandel.c...
 build_variant O0    -0 -ms -s -zl -ecc -fpi87 -nt=CODE -fi=compat.h       -od
 build_variant O3    -0 -ms -s -zl -ecc -fpi87 -nt=CODE -fi=compat.h       -ox
 build_variant mixed -0 -ms -s -zl      -fpi87 -nt=CODE -fi=compat-mixed.h -ox
+
+# OW-specific IMUL variant (owc-drc/mandel-ow.c): FP_MUL is a #pragma aux 16x16
+# IMUL + byte-extract, so it needs NO owmath (__I4M) at link time.  Output stays
+# byte-identical to the oracle; ~4.6x fewer clocks than portable O3.
+build_ow_imul() {
+    local W; W="$(mktemp -d /tmp/benchm.XXXXXX)"
+    cp "$OWC"/compat.h "$OWC"/owcrt.asm "$OWC"/putchar.asm \
+       "$OWC"/mandel-ow.c "$OWC"/drc/clears.l86 "$W/"
+    cp "$LINK86" "$W/LINKCMD.EXE"
+    (
+        cd "$W"
+        "$BIN/bwasm" -0 -ms owcrt.asm   -fo=OWCRT.OBJ   >/dev/null
+        "$BIN/bwasm" -0 -ms putchar.asm -fo=PUTCHAR.OBJ >/dev/null
+        cp mandel-ow.c MOW.C
+        "$BIN/bwcc" -0 -ms -s -zl -ecc -fpi87 -nt=CODE -fi=compat.h -ox \
+            -Dmain=cmain MOW.C -fo=MOW.OBJ >/dev/null 2>&1 \
+            || { echo "error: compile failed for 'OWIMUL'" >&2; exit 1; }
+        EMU2_DRIVE_D="$W" EMU2_PROGNAME='d:\LINKCMD.EXE' \
+            "$EMU2" "$W/LINKCMD.EXE" "MOW=OWCRT,MOW,PUTCHAR,CLEARS.L86[S]" >link.log 2>&1 || true
+        [ -f MOW.CMD ] || { echo "error: link produced no MOW.CMD for 'OWIMUL'" >&2; cat link.log >&2; exit 1; }
+        cp MOW.CMD "$OWC/MANDEL-OWIMUL.CMD"
+    )
+    rm -rf "$W"
+}
+build_ow_imul
 echo
 
 # Rebuild the DR C oracle if DRC_HOME is available, else use baseline.json.
@@ -105,7 +130,7 @@ if [ -n "${DRC_HOME:-}" ] && [ -f "${DRC_HOME}/drc.cmd" ]; then
 fi
 
 if [ -f "$ORACLE" ]; then
-    for v in O0 O3 mixed; do
+    for v in O0 O3 mixed OWIMUL; do
         echo "### DR C (oracle) vs Watcom $v ###"
         python3 "$HERE/bench.py" compare "$ORACLE" "$OWC/MANDEL-$v.CMD" \
             --mhz "$MHZ" --label-candidate "Watcom $v"
@@ -114,7 +139,7 @@ if [ -f "$ORACLE" ]; then
 else
     echo "(DR C oracle owc-drc/MANDEL-DRC.CMD not present -- checking against baseline.json)"
     echo
-    for v in O0 O3 mixed; do
+    for v in O0 O3 mixed OWIMUL; do
         echo "### baseline mandel (DR C) vs Watcom $v ###"
         python3 "$HERE/bench.py" baseline check mandel "$OWC/MANDEL-$v.CMD" --mhz "$MHZ" \
             || true
