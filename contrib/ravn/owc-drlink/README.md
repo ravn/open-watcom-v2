@@ -37,10 +37,12 @@ Two independent axes matter: the **object/container format** and the **ABI**.
 ### 1. Object format: Watcom OMF is consumed by DR LINK86 as-is
 
 Open Watcom emits Intel/Microsoft **OMF**. Digital Research's `LINK86` (the
-native CP/M-86 cross linker, v2.02, part of the `cpm86-crossdev` submodule's DR
-tools) reads Watcom `.obj` files directly and emits a proper `.CMD` with correct
-group descriptors. Verified by assembling a trivial object with `bwasm` and
-linking it with `linkcmd.exe` → a runnable `.CMD`.
+authentic native CP/M-86 linker **v1.4**, 19 March 1984 — the same one DR C 1.11
+uses, run under the emu2-cpm86 fork) reads Watcom `.obj` files directly and emits
+a proper `.CMD` with correct group descriptors. Verified by assembling a trivial
+object with `bwasm` and linking it with `LINK86.CMD` → a runnable `.CMD`. (The
+DOS-hosted `linkcmd.exe` in `cpm86-crossdev` is LINK-86 v2.02 from 1987 —
+anachronistic; this demo uses the canonical v1.4, overridable via `LINK86=`.)
 
 By contrast, the **Aztec** C runtime (`c86.lib`, `begin86.o`) is *not* OMF — its
 objects begin with the magic bytes `66 54` (`"fT…"`, e.g. `fTbegin`) and Watcom's
@@ -97,18 +99,12 @@ convention as `../cpmstart.asm` and as Aztec's `c86.lib`.
 
 1. Built Open Watcom cross-tools (`bwcc`/`bwasm`, or `wcc`/`wasm` on `PATH`) —
    run the repo's top-level `./build.sh`.
-2. The `contrib/ravn/cpm86-crossdev` submodule populated with the DR tools and
-   `emu2` (and `cpm86` for running):
-
-   ```sh
-   cd ../cpm86-crossdev
-   ./src/fetch/buildemu2      # builds bin/emu2
-   ./src/fetch/drtools        # fetches share/pcdev/linkcmd.exe, lib86.exe
-   # (for running: ./src/fetch/aztec34 + ./src/fetch/buildcpm86 → share/emu/cpm86.exe)
-   ```
-
-   The fetched binaries live under the submodule's gitignored `share/`, `bin/`
-   and `archive/` — they are **not** committed.
+2. The canonical CP/M-86 tools from the workspace (defaults, both overridable):
+   the authentic **DR LINK-86 v1.4** (`scratch/rc759-cmd-toolchain/drc86111/LINK86.CMD`,
+   19 March 1984) and the **emu2-cpm86** fork
+   (`scratch/cpm86-tools/emu2-cpm86/emu2`, runs a CP/M-86 `.CMD` natively). Set
+   `LINK86=` / `EMU2=` to point elsewhere. (The older `cpm86-crossdev`
+   `linkcmd.exe` is LINK-86 v2.02 from 1987 — anachronistic; not used.)
 
 ## Files
 

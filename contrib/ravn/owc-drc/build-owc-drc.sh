@@ -13,8 +13,9 @@
 # Prerequisites:
 #   * ./drc/clears.l86 + headers  -> run ./fetch-drc.sh first
 #   * Open Watcom native tools built in ../../../build/binbuild (bwcc, bwasm)
-#   * cpm86-crossdev submodule populated (../cpm86-crossdev/bin/emu2 and
-#     share/pcdev/linkcmd.exe) -- provides DR LINK-86 via emu2
+#   * Canonical CP/M-86 linker+emulator (overridable via LINK86=/EMU2=): the
+#     authentic DR LINK-86 v1.4 (scratch/rc759-cmd-toolchain/drc86111/LINK86.CMD)
+#     run under the emu2-cpm86 fork (scratch/cpm86-tools/emu2-cpm86/emu2)
 #   * python3 with the 'unicorn' package (for cpm86run_unicorn.py)
 #
 set -euo pipefail
@@ -22,8 +23,14 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../../.." && pwd)"
 XDEV="$HERE/../cpm86-crossdev"
 BIN="$REPO/build/binbuild"
-EMU2="$XDEV/bin/emu2"
-LINK86="$XDEV/share/pcdev/linkcmd.exe"
+# CANONICAL TOOLCHAIN (see wlink-cpm86-plan.md): the AUTHENTIC DR LINK-86 v1.4
+# (19 March 1984) -- the same native CP/M-86 linker DR C v1.11 uses -- run under
+# the emu2-cpm86 fork (executes a CP/M-86 .CMD natively).  NOT linkcmd.exe (LINK-86
+# v2.02, 1987), which is anachronistic; the older XDEV emu2 cannot run a .CMD
+# directly.  Both paths overridable.
+WS="$(cd "$HERE/../../../.." && pwd)"      # workspace root (/Users/ravn/z80)
+EMU2="${EMU2:-$WS/scratch/cpm86-tools/emu2-cpm86/emu2}"
+LINK86="${LINK86:-$WS/scratch/rc759-cmd-toolchain/drc86111/LINK86.CMD}"
 RUNNER="$HERE/../cpm86run_unicorn.py"
 
 # Shared Open Watcom flags:
@@ -51,13 +58,28 @@ WORK="$(mktemp -d /tmp/owcdrc.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 cp "$HERE/compat.h" "$HERE/owcrt.asm" "$HERE/drc/clears.l86" "$WORK/"
 cp "$HERE"/drc/*.h "$WORK/" 2>/dev/null || true
-cp "$LINK86" "$WORK/LINKCMD.EXE"
+cp "$LINK86" "$WORK/LINK86.CMD"
+cp "$HERE/drc/clears.l86" "$WORK/CLEARS.L86"
 cd "$WORK"
+
+# owmath_objs -- assemble Open Watcom's OWN 32-bit long helpers (__U4M/__I4M/
+# __U4D/__I4D) from its cgsupp sources into I4M.OBJ + I4D.OBJ in the work dir,
+# ready to add to a link as "I4M,I4D".  These replace the former hand-written
+# owmath.asm: runtime helpers must come from the compiler, never from us.  The
+# small model's near CALL needs the helper _TEXT folded into CODE, so we pass
+# --merge-text-into-code (see omf-delocal.py).
+owmath_objs() {
+    "$BIN/bwasm" -0 -ms -q -i="$REPO/bld/watcom/h" "$REPO/bld/clib/cgsupp/a/i4m.asm" -fo=I4M0.OBJ >/dev/null
+    "$BIN/bwasm" -0 -ms -q -i="$REPO/bld/watcom/h" "$REPO/bld/clib/cgsupp/a/i4d.asm" -fo=I4D0.OBJ >/dev/null
+    python3 "$HERE/stdcbench/omf-delocal.py" --merge-text-into-code I4M0.OBJ I4M.OBJ
+    python3 "$HERE/stdcbench/omf-delocal.py" --merge-text-into-code I4D0.OBJ I4D.OBJ
+}
 
 link() {   # link <OUT> <obj1,obj2,...>
     local out="$1" objs="$2"
-    EMU2_DRIVE_D="$WORK" EMU2_PROGNAME='d:\LINKCMD.EXE' \
-        "$EMU2" "$WORK/LINKCMD.EXE" "$out=$objs,CLEARS.L86[S]" >link.log 2>&1 || true
+    # DR LINK-86 v1.4 run natively under emu2-cpm86 (drive A = the work dir).
+    EMU2_DRIVE_A=. EMU2_DEFAULT_DRIVE=A \
+        "$EMU2" LINK86.CMD "$out=$objs,CLEARS.L86[S]" >link.log 2>&1 || true
     if grep -qiE 'Undefined|OBJECT FILE ERROR|TARGET OUT OF RANGE|NO FILE' link.log; then
         echo "!! link problems:" >&2; grep -iE 'Undefined|OBJECT|ERROR|RANGE|NO FILE|Symbol' link.log >&2
     fi
@@ -100,12 +122,11 @@ dhry)
         "$BIN/bwcc" $CFLAGS -DMSC_CLOCK -Dmain=cmain -i. "$u.C" -fo="$u.OBJ" >/dev/null 2>&1
     done
     "$BIN/bwcc" $CFLAGS GLUE.C -fo=GLUE.OBJ >/dev/null
-    # owmath.asm supplies Watcom's 32-bit long helpers (__U4M/__I4M/__U4D) that
-    # DR C lacks; glue.c's clock()/time() do 32-bit multiplies, so the dhry link
-    # needs them too (as the stdcbench link does).
-    cp "$HERE/stdcbench/owmath.asm" owmath.asm
-    "$BIN/bwasm" -0 -ms owmath.asm -fo=OWMATH.OBJ >/dev/null
-    link DHRY "OWCRT,DHRY_1,DHRY_2,GLUE,OWMATH"
+    # Open Watcom's OWN 32-bit long helpers (__U4M/__I4M/__U4D/__I4D) that DR C
+    # lacks; glue.c's clock()/time() do 32-bit multiplies, so the dhry link needs
+    # them too (as the stdcbench link does).
+    owmath_objs
+    link DHRY "OWCRT,DHRY_1,DHRY_2,GLUE,I4M,I4D"
     cp DHRY.CMD "$HERE/DHRY.CMD"
     echo "== running DHRY.CMD (50 runs) =="
     printf '50\n' | python3 "$RUNNER" "$HERE/DHRY.CMD"
@@ -114,15 +135,14 @@ mandel)
     # 80x25 ASCII Mandelbrot, fixed-point 8.8 (owc-drc/mandel.c), ported from
     # the llvm-z80 test-gen example.  Output is deterministic (no timing, no
     # input); the only I/O primitive is the shared putchar.asm (BDOS C_WRITE),
-    # so it links WITHOUT DR C's buffered stdio.  owmath.asm supplies the
-    # 32-bit long helpers FP_MUL's (long)a*b>>8 needs.
+    # so it links WITHOUT DR C's buffered stdio.  Open Watcom's OWN cgsupp
+    # helpers supply the 32-bit long helpers FP_MUL's (long)a*b>>8 needs.
     cp "$HERE/mandel.c" MANDEL.C
     cp "$HERE/putchar.asm" putchar.asm
-    cp "$HERE/stdcbench/owmath.asm" owmath.asm
     "$BIN/bwasm" -0 -ms putchar.asm -fo=PUTCHAR.OBJ >/dev/null
-    "$BIN/bwasm" -0 -ms owmath.asm  -fo=OWMATH.OBJ  >/dev/null
+    owmath_objs
     "$BIN/bwcc" $CFLAGS -Dmain=cmain MANDEL.C -fo=MANDEL.OBJ >/dev/null
-    link MANDEL "OWCRT,MANDEL,PUTCHAR,OWMATH"
+    link MANDEL "OWCRT,MANDEL,PUTCHAR,I4M,I4D"
     cp MANDEL.CMD "$HERE/MANDEL.CMD"
     echo "== running MANDEL.CMD =="
     python3 "$RUNNER" "$HERE/MANDEL.CMD"
@@ -157,8 +177,9 @@ stdcbench)
     #   * omf-delocal.py -- rewrites Open Watcom's LEXTDEF/LPUBDEF (0xB4/0xB6,
     #                       emitted for file-scope statics) to plain EXTDEF/
     #                       PUBDEF, which 1987 DR LINK-86 accepts.
-    #   * owmath.asm     -- Watcom's 32-bit long helpers __U4M/__I4M/__U4D,
-    #                       pulled in by the unsigned-long score arithmetic.
+    #   * cgsupp helpers -- Open Watcom's OWN 32-bit long helpers __U4M/__I4M/
+    #                       __U4D/__I4D, pulled in by the unsigned-long score
+    #                       arithmetic (assembled from bld/clib/cgsupp/a).
     #
     # portme.c also repairs DR C's heap base (see its comments): malloc()
     # would otherwise hand out memory on top of the program's static data.
@@ -170,10 +191,10 @@ stdcbench)
             "https://downloads.sourceforge.net/project/stdcbench/stdcbench-0.8.tar.gz"
         tar xzf "$SCB/src/stdcbench-0.8.tar.gz" -C "$SCB/src"
     fi
-    # Neutral libc headers, our glue, the OMF filter and the math helpers.
+    # Neutral libc headers, our glue and the OMF filter.
     cp -R "$SCB/inc" inc
     cp "$SCB/portme.h" "$SCB/portme.c" "$SCB/cpmlibc.c" \
-       "$SCB/omf-delocal.py" "$SCB/owmath.asm" .
+       "$SCB/omf-delocal.py" .
     # Upstream headers (portme.h above deliberately shadows the upstream one).
     cp "$SRC/stdcbench.h" "$SRC/c90base-huffman.h" \
        "$SRC/c90lib-htab.h" "$SRC/c90lib-peep.h" .
@@ -200,8 +221,8 @@ c90lib-peep-stm8.c c90lib-htab.c stdcbench.c"
         python3 omf-delocal.py "$nn.OBJ" "$nn.OBJ"
         objs="$objs,$nn"; i=$((i + 1))
     done
-    "$BIN/bwasm" -0 -ms owmath.asm -fo=OWMATH.OBJ >/dev/null
-    objs="$objs,OWMATH"
+    owmath_objs
+    objs="$objs,I4M,I4D"
     link SCB "$objs"
     cp SCB.CMD "$HERE/SCB.CMD"
     echo "== running SCB.CMD =="

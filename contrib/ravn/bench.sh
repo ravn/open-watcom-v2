@@ -33,8 +33,13 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 XDEV="$HERE/cpm86-crossdev"
 BIN="$REPO/build/binbuild"
-EMU2="$XDEV/bin/emu2"
-LINK86="$XDEV/share/pcdev/linkcmd.exe"
+# CANONICAL TOOLCHAIN (see wlink-cpm86-plan.md): authentic DR LINK-86 v1.4
+# (19 March 1984), the same native CP/M-86 linker DR C 1.11 uses, run under the
+# emu2-cpm86 fork (executes a CP/M-86 .CMD natively).  NOT linkcmd.exe (LINK-86
+# v2.02, 1987).  Both overridable.
+WS="$(cd "$HERE/../../.." && pwd)"        # workspace root (/Users/ravn/z80)
+EMU2="${EMU2:-$WS/scratch/cpm86-tools/emu2-cpm86/emu2}"
+LINK86="${LINK86:-$WS/scratch/rc759-cmd-toolchain/drc86111/LINK86.CMD}"
 OWC="$HERE/owc-drc"
 RUNS=200
 MHZ=6
@@ -62,7 +67,8 @@ build_variant() {
     python3 "$HERE/pure-drc/drcify.py" "$OWC/dhry21" "$W" "$RUNS" watcom >/dev/null
     cp "$OWC"/compat.h "$OWC"/compat-mixed.h "$OWC"/owcrt.asm "$OWC"/drc/clears.l86 "$W/"
     cp "$OWC"/drc/*.h "$W/" 2>/dev/null || true
-    cp "$LINK86" "$W/LINKCMD.EXE"
+    cp "$LINK86" "$W/LINK86.CMD"
+    cp "$OWC"/drc/clears.l86 "$W/CLEARS.L86"
     (
         cd "$W"
         "$BIN/bwasm" -0 -ms owcrt.asm -fo=OWCRT.OBJ >/dev/null
@@ -70,8 +76,8 @@ build_variant() {
             "$BIN/bwcc" $cflags -Dmain=cmain -i. "$u.C" -fo="$u.OBJ" >/dev/null 2>&1 \
                 || { echo "error: compile $u failed for '$label'" >&2; exit 1; }
         done
-        EMU2_DRIVE_D="$W" EMU2_PROGNAME='d:\LINKCMD.EXE' \
-            "$EMU2" "$W/LINKCMD.EXE" "DHRY=OWCRT,DHRY_1,DHRY_2,CLEARS.L86[S]" >link.log 2>&1 || true
+        EMU2_DRIVE_A=. EMU2_DEFAULT_DRIVE=A \
+            "$EMU2" LINK86.CMD "DHRY=OWCRT,DHRY_1,DHRY_2,CLEARS.L86[S]" >link.log 2>&1 || true
         [ -f DHRY.CMD ] || { echo "error: link produced no DHRY.CMD for '$label'" >&2; cat link.log >&2; exit 1; }
         cp DHRY.CMD "$OWC/DHRY-$label.CMD"
     )

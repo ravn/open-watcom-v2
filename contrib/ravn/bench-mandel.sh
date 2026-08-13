@@ -45,8 +45,15 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 XDEV="$HERE/cpm86-crossdev"
 BIN="$REPO/build/binbuild"
-EMU2="$XDEV/bin/emu2"
-LINK86="$XDEV/share/pcdev/linkcmd.exe"
+# CANONICAL TOOLCHAIN (see wlink-cpm86-plan.md).  We standardized on the AUTHENTIC
+# DR LINK-86 v1.4 (19 March 1984), the same native CP/M-86 linker DR C v1.11 uses
+# itself -- NOT the DOS-hosted cross-linker linkcmd.exe (LINK-86 v2.02, 1987),
+# which is anachronistic for this era.  v1.4 runs directly under the emu2-cpm86
+# fork (which executes a CP/M-86 .CMD natively); the older XDEV emu2 cannot, so we
+# use the workspace's canonical emu2-cpm86 + LINK86.CMD.  Both are overridable.
+WS="$(cd "$HERE/../../.." && pwd)"     # workspace root (/Users/ravn/z80)
+EMU2="${EMU2:-$WS/scratch/cpm86-tools/emu2-cpm86/emu2}"
+LINK86="${LINK86:-$WS/scratch/rc759-cmd-toolchain/drc86111/LINK86.CMD}"
 OWC="$HERE/owc-drc"
 MHZ=6
 
@@ -69,21 +76,28 @@ build_variant() {
     local cflags="$*"
     local W; W="$(mktemp -d /tmp/benchm.XXXXXX)"
     cp "$OWC"/compat.h "$OWC"/compat-mixed.h "$OWC"/owcrt.asm "$OWC"/putchar.asm \
-       "$OWC"/mandel.c "$OWC"/drc/clears.l86 "$OWC"/stdcbench/owmath.asm "$W/"
+       "$OWC"/mandel.c "$OWC"/drc/clears.l86 "$W/"
     cp "$OWC"/drc/*.h "$W/" 2>/dev/null || true
-    cp "$LINK86" "$W/LINKCMD.EXE"
+    cp "$LINK86" "$W/LINK86.CMD"
+    cp "$OWC"/drc/clears.l86 "$W/CLEARS.L86"
     (
         cd "$W"
         "$BIN/bwasm" -0 -ms owcrt.asm   -fo=OWCRT.OBJ   >/dev/null
         "$BIN/bwasm" -0 -ms putchar.asm -fo=PUTCHAR.OBJ >/dev/null
-        # owmath.asm supplies Watcom's 32-bit long helpers (__U4M/__I4M/...) that
-        # DR C's library lacks; FP_MUL does a (long)a*b>>8, so the link needs them.
-        "$BIN/bwasm" -0 -ms owmath.asm  -fo=OWMATH.OBJ  >/dev/null
+        # 32-bit long helpers (__U4M/__I4M/...) come from Open Watcom's OWN
+        # cgsupp sources (FP_MUL does (long)a*b>>8), assembled by Watcom's own
+        # assembler -- never a hand-written owmath.asm.  --merge-text-into-code
+        # folds their _TEXT into the -nt=CODE group so the near CALL resolves.
+        "$BIN/bwasm" -0 -ms -q -i="$REPO/bld/watcom/h" "$REPO/bld/clib/cgsupp/a/i4m.asm" -fo=I4M0.OBJ >/dev/null
+        "$BIN/bwasm" -0 -ms -q -i="$REPO/bld/watcom/h" "$REPO/bld/clib/cgsupp/a/i4d.asm" -fo=I4D0.OBJ >/dev/null
+        python3 "$OWC/stdcbench/omf-delocal.py" --merge-text-into-code I4M0.OBJ I4M.OBJ
+        python3 "$OWC/stdcbench/omf-delocal.py" --merge-text-into-code I4D0.OBJ I4D.OBJ
         cp mandel.c MAND.C
         "$BIN/bwcc" $cflags -Dmain=cmain MAND.C -fo=MAND.OBJ >/dev/null 2>&1 \
             || { echo "error: compile failed for '$label'" >&2; exit 1; }
-        EMU2_DRIVE_D="$W" EMU2_PROGNAME='d:\LINKCMD.EXE' \
-            "$EMU2" "$W/LINKCMD.EXE" "MAND=OWCRT,MAND,PUTCHAR,OWMATH,CLEARS.L86[S]" >link.log 2>&1 || true
+        # DR LINK-86 v1.4 run natively under emu2-cpm86 (drive A = work dir).
+        EMU2_DRIVE_A=. EMU2_DEFAULT_DRIVE=A \
+            "$EMU2" LINK86.CMD "MAND=OWCRT,MAND,PUTCHAR,I4M,I4D,CLEARS.L86[S]" >link.log 2>&1 || true
         [ -f MAND.CMD ] || { echo "error: link produced no MAND.CMD for '$label'" >&2; cat link.log >&2; exit 1; }
         cp MAND.CMD "$OWC/MANDEL-$label.CMD"
     )
@@ -102,7 +116,8 @@ build_ow_imul() {
     local W; W="$(mktemp -d /tmp/benchm.XXXXXX)"
     cp "$OWC"/compat.h "$OWC"/owcrt.asm "$OWC"/putchar.asm \
        "$OWC"/mandel-ow.c "$OWC"/drc/clears.l86 "$W/"
-    cp "$LINK86" "$W/LINKCMD.EXE"
+    cp "$LINK86" "$W/LINK86.CMD"
+    cp "$OWC"/drc/clears.l86 "$W/CLEARS.L86"
     (
         cd "$W"
         "$BIN/bwasm" -0 -ms owcrt.asm   -fo=OWCRT.OBJ   >/dev/null
@@ -111,8 +126,8 @@ build_ow_imul() {
         "$BIN/bwcc" -0 -ms -s -zl -ecc -fpi87 -nt=CODE -fi=compat.h -ox \
             -Dmain=cmain MOW.C -fo=MOW.OBJ >/dev/null 2>&1 \
             || { echo "error: compile failed for 'OWIMUL'" >&2; exit 1; }
-        EMU2_DRIVE_D="$W" EMU2_PROGNAME='d:\LINKCMD.EXE' \
-            "$EMU2" "$W/LINKCMD.EXE" "MOW=OWCRT,MOW,PUTCHAR,CLEARS.L86[S]" >link.log 2>&1 || true
+        EMU2_DRIVE_A=. EMU2_DEFAULT_DRIVE=A \
+            "$EMU2" LINK86.CMD "MOW=OWCRT,MOW,PUTCHAR,CLEARS.L86[S]" >link.log 2>&1 || true
         [ -f MOW.CMD ] || { echo "error: link produced no MOW.CMD for 'OWIMUL'" >&2; cat link.log >&2; exit 1; }
         cp MOW.CMD "$OWC/MANDEL-OWIMUL.CMD"
     )

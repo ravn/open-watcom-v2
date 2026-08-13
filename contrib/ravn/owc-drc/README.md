@@ -272,9 +272,10 @@ milliseconds). The counter is a deterministic virtual clock (proportional to
 the code the emulated 8086 executes), so the reported Dhrystones/sec is
 **reproducible** and scales with code efficiency and the emulated CPU rate
 (`CPM86_CLOCK_HZ`). `glue.c` also still provides a whole-second `time()` via
-T_GET for any code that wants wall-clock seconds. The link includes
-`owmath.asm` because the millisecond arithmetic needs Watcom's 32-bit long
-helpers, which DR C lacks.
+T_GET for any code that wants wall-clock seconds. The link includes Open
+Watcom's own cgsupp long helpers (`i4m`/`i4d`, assembled from
+`bld/clib/cgsupp/a`) because the millisecond arithmetic needs Watcom's 32-bit
+long helpers, which DR C lacks.
 
 ## Why not use Watcom's own run-time?
 
@@ -296,8 +297,12 @@ using the bundled `diskdefs` format `drc-rc759`. A newer v1.11 image exists at
 
 1. Open Watcom native tools built in `../../../build/binbuild` (`bwcc`, `bwasm`) —
    run the repo's top-level `./build.sh`.
-2. The `../cpm86-crossdev` submodule populated with `emu2` and the DR tools
-   (`bin/emu2`, `share/pcdev/linkcmd.exe`) — see that submodule's fetch scripts.
+2. The canonical CP/M-86 linker + emulator: the authentic **DR LINK-86 v1.4**
+   (`scratch/rc759-cmd-toolchain/drc86111/LINK86.CMD`, 19 March 1984) run under
+   the **emu2-cpm86** fork (`scratch/cpm86-tools/emu2-cpm86/emu2`, executes a
+   CP/M-86 `.CMD` natively). Both default from `$WS` (the workspace root) and are
+   overridable via `LINK86=`/`EMU2=`. (The older `../cpm86-crossdev` `linkcmd.exe`
+   is LINK-86 v2.02 from 1987 — anachronistic; not used.)
 3. `cpmtools`, `curl`, `shasum` on `PATH` (for `fetch-drc.sh`).
 4. `python3` with the `unicorn` package (for `../cpm86run_unicorn.py`).
 

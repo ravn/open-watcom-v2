@@ -9,7 +9,7 @@
 # Watcom .obj files and emits a proper .CMD with correct group descriptors.
 #
 # KEY FACTS (verified, see README.md):
-#   * Open Watcom emits Intel/MS OMF; DR LINK86 (LINK86 2.02) accepts it as-is.
+#   * Open Watcom emits Intel/MS OMF; DR LINK-86 v1.4 (1984) accepts it as-is.
 #   * Compile C with -ecc so Watcom uses cdecl (stack args, leading underscore),
 #     matching a classic C-runtime ABI.
 #   * Do NOT name the C entry `main` (that pulls Watcom's _cstart_ and exports
@@ -41,12 +41,17 @@ WCC=$(pick wcc "$BINB/bwcc")
 WASM=$(pick wasm "$BINB/bwasm")
 
 XDEV="$HERE/../cpm86-crossdev"
-EMU2="$XDEV/bin/emu2"
-LINK86="$XDEV/share/pcdev/linkcmd.exe"
+# CANONICAL TOOLCHAIN (see wlink-cpm86-plan.md): authentic DR LINK-86 v1.4
+# (19 March 1984), the same native CP/M-86 linker DR C 1.11 uses, run under the
+# emu2-cpm86 fork (executes a CP/M-86 .CMD natively).  NOT linkcmd.exe (LINK-86
+# v2.02, 1987).  Both overridable.
+WS=$(cd "$HERE/../../../.." && pwd)       # workspace root (/Users/ravn/z80)
+EMU2="${EMU2:-$WS/scratch/cpm86-tools/emu2-cpm86/emu2}"
+LINK86="${LINK86:-$WS/scratch/rc759-cmd-toolchain/drc86111/LINK86.CMD}"
 
 [ -x "$WCC" ]  || { echo "ERR: Watcom C compiler not found ($WCC). Run ./build.sh." >&2; exit 1; }
-[ -x "$EMU2" ] || { echo "ERR: emu2 not built. Run cpm86-crossdev/src/fetch/buildemu2." >&2; exit 1; }
-[ -f "$LINK86" ] || { echo "ERR: DR linkcmd.exe missing. Run cpm86-crossdev/src/fetch/drtools." >&2; exit 1; }
+[ -x "$EMU2" ] || { echo "ERR: emu2-cpm86 not found ($EMU2)." >&2; exit 1; }
+[ -f "$LINK86" ] || { echo "ERR: DR LINK-86 v1.4 missing ($LINK86)." >&2; exit 1; }
 
 WORK=$(mktemp -d /tmp/owcdr.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
@@ -56,7 +61,7 @@ trap 'rm -rf "$WORK"' EXIT
 # short-pathed work dir with bare filenames so THEADR stays within the limit.
 cp "$SRC" "$WORK/HELLO.C"
 cp "$HERE/crt.asm" "$WORK/CRT.ASM"
-cp "$LINK86" "$WORK/LINKCMD.EXE"
+cp "$LINK86" "$WORK/LINK86.CMD"
 
 # 1. Compile C to OMF: 8086 (-$CPU), small model (-ms), no stack checks (-s),
 #    no default library refs (-zl), force cdecl ABI (-ecc).
@@ -65,17 +70,17 @@ cp "$LINK86" "$WORK/LINKCMD.EXE"
 # 2. Assemble the tiny OMF runtime.
 ( cd "$WORK" && "$WASM" "-$CPU" CRT.ASM -fo=CRT.OBJ )
 
-# 3. Link both OMF objects with DR LINK86 -> .CMD (runtime first = entry).
+# 3. Link both OMF objects with DR LINK-86 v1.4 -> .CMD (runtime first = entry).
+#    Run natively under emu2-cpm86 (drive A = the work dir).
 #    LINK86 syntax: OUTPUT=INPUT1,INPUT2  (drops .OBJ / .CMD extensions).
-( cd "$WORK" && EMU2_DRIVE_D="$WORK" EMU2_PROGNAME='d:\LINKCMD.EXE' \
-    "$EMU2" "$WORK/LINKCMD.EXE" "HELLO=CRT,HELLO" -- PATH=D:\\ LIB=D:\\ ) \
+( cd "$WORK" && EMU2_DRIVE_A=. EMU2_DEFAULT_DRIVE=A \
+    "$EMU2" LINK86.CMD "HELLO=CRT,HELLO" ) \
     2>&1 | grep -iE 'undefined|no file|error|CODE|DATA' || true
 
 cp "$WORK/HELLO.CMD" "$HERE/$CMD"
 echo "OK: $HERE/$CMD"
 
-# 4. Optional: run it if the cpm86 emulator is available.
-if [ -x "$XDEV/bin/cpm86" ] && [ -f "$XDEV/share/emu/cpm86.exe" ]; then
-    echo "--- run on CP/M-86 emulator ---"
-    ( cd "$HERE" && PATH="$XDEV/bin:$PATH" cpm86 "$CMD" ) 2>&1 | grep -v 'Copyright\|emulator for DOS'
-fi
+# 4. Run it directly under the emu2-cpm86 fork (executes a CP/M-86 .CMD natively).
+echo "--- run on CP/M-86 emulator ---"
+( cd "$HERE" && EMU2_DRIVE_A=. EMU2_DEFAULT_DRIVE=A "$EMU2" "$CMD" ) 2>&1 \
+    | grep -v 'Copyright\|emulator for DOS' || true

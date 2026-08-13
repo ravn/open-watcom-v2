@@ -53,11 +53,15 @@ which from `cpmlibc.c`.
    collisions in stdcbench, so this is safe. Every `.OBJ` is filtered before
    linking.
 
-2. **Watcom 32-bit long helpers (`owmath.asm`).** The score arithmetic uses
-   `unsigned long` multiply/divide, so the code generator references
-   `__U4M`/`__I4M` (32-bit multiply) and `__U4D` (unsigned 32-bit divide),
-   which live in Watcom's own library. `owmath.asm` re-implements just those
-   three, standalone, in segment `CODE`/`CGROUP`.
+2. **Watcom 32-bit long helpers (cgsupp `i4m`/`i4d`).** The score arithmetic
+   uses `unsigned long` multiply/divide, so the code generator references
+   `__U4M`/`__I4M` (32-bit multiply) and `__U4D`/`__I4D` (32-bit divide),
+   which live in Watcom's own library. Rather than hand-write them, the build
+   assembles Open Watcom's OWN cgsupp sources
+   (`bld/clib/cgsupp/a/i4m.asm`, `i4d.asm`) with `bwasm -0 -ms`, then folds the
+   helper's `_TEXT` into `CODE` (`omf-delocal.py --merge-text-into-code`) so the
+   small-model near CALL stays in-segment. All runtime helpers come from the
+   compiler, never from us.
 
 3. **THEADR length.** DR LINK-86 rejects long module names
    (`OBJECT FILE ERROR 10`); Open Watcom stamps the source path into the OMF
@@ -136,8 +140,8 @@ finely. The score scales with code efficiency.
 | `portme.c` / `portme.h` | entry point (`cmain`), RC759 XIOS 16 ms clock (Int 28h fn 19), heap-base fix, module selection |
 | `cpmlibc.c` | the ANSI routines DR C lacks (`mem*`, `strstr`, `strtol`, `ctype`) |
 | `inc/*.h` | neutral C90 headers matching DR C's small-model ABI |
-| `omf-delocal.py` | rewrites Watcom `LEXTDEF`/`LPUBDEF` so DR LINK-86 accepts the objects |
-| `owmath.asm` | standalone `__U4M` / `__I4M` / `__U4D` long helpers |
+| `omf-delocal.py` | rewrites Watcom `LEXTDEF`/`LPUBDEF` so DR LINK-86 accepts the objects; `--merge-text-into-code` folds the cgsupp helper `_TEXT` into `CODE` |
+| _(long helpers)_ | Open Watcom's OWN `bld/clib/cgsupp/a/i4m.asm` + `i4d.asm` (`__U4M`/`__I4M`/`__U4D`/`__I4D`), assembled at build time — no hand-written helper |
 | `src/` | the downloaded upstream tarball (git-ignored) |
 
 ## Provenance
