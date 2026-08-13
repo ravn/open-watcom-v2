@@ -3,31 +3,58 @@
    Entry point is cmain (owcrt.asm bridges DR C's "main" to it, because Open
    Watcom special-cases the name "main").  See ../README.md.
 
-   stdcbench_clock() reads the RC759 XIOS "16 ms counter" (Int 28h function 19,
-   per the PICCOLINE Programmer's Guide), the machine's documented fine
-   relative-time source, so the benchmark measures genuine elapsed (emulated)
-   time at 16 ms resolution.  The counter is deterministic (host independent),
-   so scores are reproducible.  We express it in milliseconds, hence
-   STDCBENCH_CLOCKS_PER_SEC = 1000 (values step by 16). */
+   stdcbench_clock() reads the elapsed time via the standard Concurrent CP/M-86
+   BDOS call T_SECONDS (function 155 / 0x9B), NOT the PICCOLINE-specific XIOS
+   "16 ms counter" (Int 28h fn 19).  Rationale (verified 2026-08-14): on the
+   real RC759 turnkey disk under Concurrent CP/M-86 3.1, the XIOS does NOT
+   maintain the Int 28h fn 19 counter -- clktest read it four ways (busy loop,
+   20000 syscalls, busy again) and every field stayed 0, so the timed loop
+   spun forever and stdcbench hung after its banner.  The ordinary BDOS
+   time-of-day DOES advance (the CCP/M status-line clock ticks), so we read
+   that instead.  Policy: use only BDOS (INT 0E0h) calls here, no XIOS calls.
+
+   T_SECONDS returns a TOD structure {day: word since 1-Jan-1978; hour, min,
+   sec: 2 BCD digits each}.  Resolution is 1 second -- coarser than the old
+   16 ms, but the c90base/c90lib score formula divides by the *actual* measured
+   elapsed (SECONDS / (end - start)), so a whole-second granularity over the 8 s
+   window only quantises the result, it does not bias it.  We report the time in
+   milliseconds (total_seconds * 1000), hence STDCBENCH_CLOCKS_PER_SEC = 1000.
+   The absolute value is large (it includes the day count) but we only ever use
+   differences, which are correct under unsigned-long modular arithmetic. */
 #include <stdio.h>
 #include "stdcbench.h"
 
-/* RC759 XIOS Int 28h function 19 ("Returns 16 ms counter"): on entry AL = 19;
-   on return DX:AX = seconds since boot and CX = elapsed 16 ms periods of the
-   current second.  We copy the three words into a struct via BX (small model:
-   DS-relative). */
-struct xios_tick { unsigned lo, hi, per; };
-extern void xios_tick16(struct xios_tick *t);
-#pragma aux xios_tick16 =       \
-    "mov al,19"                 \
-    "int 28h"                   \
-    "mov [bx],ax"               \
-    "mov [bx+2],dx"             \
-    "mov [bx+4],cx"             \
+/* Concurrent CP/M-86 T_SECONDS (BDOS fn 155 / 0x9B): entry CL = 155, DX = TOD
+   offset, DS = TOD segment; fills the 5-byte TOD structure below.  We pass the
+   struct address in BX and move it to DX; DS already addresses DGROUP (the
+   struct is static), which is the required segment in both memory models. */
+struct tod { unsigned day; unsigned char hour, min, sec; };
+extern void t_seconds(struct tod *t);
+#pragma aux t_seconds =         \
+    "mov cl,155"                \
+    "mov dx,bx"                 \
+    "int 0E0h"                  \
     parm [bx]                   \
-    modify [ax cx dx];
+    modify [ax bx cx dx];
 
-#define XIOS_TICK_MS 16u
+/* 2 BCD digits packed in one byte -> binary (e.g. 0x59 -> 59). */
+#define BCD2BIN(b) ((unsigned)(((b) >> 4) * 10u + ((b) & 0x0Fu)))
+
+#ifdef MAME_DONE
+/* When built with -DMAME_DONE, signal the MAME rc759 host that the run has
+   finished by writing the score to undecoded I/O port 0x2FE (see
+   scratch/rc759-cmd-toolchain/mame-tests/mamedone.h + done_signal.lua). The
+   port is not decoded by the rc759 driver, so the OUT is side-effect-free on
+   hardware; a MAME io-space write-tap catches it and stops the emulator exactly
+   when the benchmark ends, so we need not eyeball a fixed timer. Omitted from
+   the Unicorn/emu2 build (no -DMAME_DONE) since those runners need no signal. */
+extern void mame_done(unsigned status);
+#pragma aux mame_done =         \
+    "mov dx,02FEh"              \
+    "out dx,ax"                 \
+    parm [ax]                   \
+    modify [dx];
+#endif
 
 /* --- Heap base fix for DR C on this hybrid Open-Watcom/DR-C link ---------
    DR C's heap pointer HP. is initialised (in m.init.heap) from the BSS word
@@ -50,22 +77,24 @@ static void stdcbench_init_heap(void)
 
 stdcbench_clock_t stdcbench_clock(void)
 {
-    /* MUST be static (i.e. in DGROUP/DS), not a stack local.  The xios_tick16
-       pragma stores its result with `mov [bx],ax`, which is DS-relative.  In
-       the LARGE model DS != SS (verified: DS=1EA9 vs SS=36A9), so a stack-local
-       struct would be written through DS at the wrong linear address and read
-       back as stack garbage -- c90base()'s timed do-while (run until elapsed >=
-       8 s) would then never see time advance and spin forever (the XIOS INT 28h
-       still fires, but t.lo/hi/per are stale).  A static struct lives in DS, so
-       the DS-relative store lands on it in BOTH models.  Small model was fine
-       either way because there SS == DS == DGROUP. */
-    static struct xios_tick t;
-    unsigned long    secs;
+    /* MUST be static (i.e. in DGROUP/DS), not a stack local.  t_seconds passes
+       DS as the TOD segment and the BDOS writes the structure there; a static
+       struct lives in DGROUP, which DS addresses in BOTH memory models, so the
+       fill lands on it.  (A stack local would be in the SS segment, which in
+       the LARGE model differs from DS, so the BDOS would write it elsewhere and
+       we would read back stale garbage -- the timed loop would then never see
+       time advance and spin forever.) */
+    static struct tod t;
+    unsigned long     secs;
 
-    xios_tick16(&t);
-    secs = ((unsigned long)t.hi << 16) | t.lo;
+    t_seconds(&t);
+    /* Fold day:hour:min:sec into a single monotonically increasing second
+       count.  Only differences are ever used, so the large magnitude (the day
+       term dominates) is harmless under unsigned-long modular subtraction. */
+    secs = ((((unsigned long)t.day * 24ul + BCD2BIN(t.hour)) * 60ul)
+            + BCD2BIN(t.min)) * 60ul + BCD2BIN(t.sec);
 
-    return secs * 1000ul + (unsigned long)t.per * XIOS_TICK_MS;
+    return secs * 1000ul;
 }
 
 void stdcbench_error(const char *message)
@@ -88,5 +117,10 @@ int cmain(void)
     printf("stdcbench c90lib score: %lu\n", c90lib_score);
 #endif
     printf("stdcbench final score: %lu\n", score);
+#ifdef MAME_DONE
+    /* Encode the final score in the signal word so the host reports it without
+       OCR (e.g. score 12 -> word 0x000C). Must be after the last printf. */
+    mame_done((unsigned)score);
+#endif
     return 0;
 }
