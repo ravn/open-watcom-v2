@@ -10,13 +10,14 @@ hooking the interrupt.
 This is a CPU + BDOS harness, not a full CP/M-86 machine: Unicorn provides the
 instruction set (incl. 80186+), and this file emulates the BDOS system calls a
 program makes. The console/string group is implemented, plus S_BDOSVER (12) and
-the Concurrent CP/M-86 date/time calls T_SET (104) / T_GET (105) -- so a stock
-DATE.CMD prints the correct date -- and the RC759 XIOS Int 28h function 19
-(the "16 ms counter") for fine relative timing. All of this is a superset of
-plain CP/M-86, so ordinary CP/M-86 programs keep working. Every other function
-(disk/file, and the rest of the Concurrent CP/M / XIOS API) raises a clear
-"unimplemented BDOS function" error, so unsupported programs fail loudly
-instead of silently.
+the Concurrent CP/M-86 date/time calls T_SET (104) / T_GET (105) / T_SECONDS
+(155) -- so a stock DATE.CMD prints the correct date and self-timing programs
+(e.g. stdcbench) get advancing seconds. The RC759 XIOS Int 28h fn 19 "16 ms
+counter" is deliberately NOT emulated (the real machine's XIOS does not maintain
+it). All of this is a superset of plain CP/M-86, so ordinary CP/M-86 programs
+keep working. Every other function (disk/file, and the rest of the Concurrent
+CP/M / XIOS API) raises a clear "unimplemented BDOS function" error, so
+unsupported programs fail loudly instead of silently.
 
 Program load emulates the CCP: the memory model (8080 / small) is read from the
 .CMD group descriptors, groups are placed in memory, segment registers and the
@@ -68,22 +69,20 @@ CLOCK_HZ = int(os.environ.get("CPM86_CLOCK_HZ", "20000"))
 # CP/M's date field is a day number with day 1 == 1 January 1978.
 CPM_DAY_ONE = datetime.date(1978, 1, 1)
 
-# --- RC759 XIOS 16 ms relative-time tick (Int 28h function 19) --------------
+# --- Relative-time source: BDOS T_SECONDS (not XIOS Int 28h fn 19) ----------
 # The RC759 Piccoline runs an Intel 80186 (6-8 MHz), but its three on-chip
 # 80186 timers are wired to sound/cassette, not timekeeping (PICCOLINE
-# Programmer's Guide sec. 2.3).  Program-visible time comes from two places:
-# the battery-backed real-time clock -- one-second resolution, read via the
-# Concurrent CP/M-86 T_GET call -- and, for finer relative measurements, an
-# XIOS counter read through Int 28h function 19.  The Guide (App. A, function
-# 19) says the XIOS "maintains a 32 bit wide second count field and a tick (16
-# millisecond) count field which together make it possible to make relative
-# time measurements with a 16 millisecond resolution", initialised to zero at
-# boot.  So 16 ms is the finest resolution real RC759 software can obtain, and
-# we model exactly that call: Int 28h/AL=19 returns DX:AX = seconds since start
-# and CX = elapsed 16 ms periods of the current second.  Both fields are driven
-# by the same deterministic code-byte virtual clock (seconds = ticks/CLOCK_HZ),
-# so differences stay host independent and reproducible.  Override the tick
-# length via CPM86_TICK_MS (default 16, matching the Guide and the guest).
+# Programmer's Guide sec. 2.3).  The PICCOLINE Guide (App. A, fn 19) documents an
+# XIOS "16 ms counter" read via Int 28h function 19, but on the real Concurrent
+# CP/M-86 turnkey disk that XIOS does NOT maintain the counter (verified: it
+# never advances, so stdcbench's timed loop hung).  So we do NOT model fn 19.
+# Program-visible time that DOES advance comes from the ordinary BDOS clock:
+# T_GET (fn 105, date + minute) and T_SECONDS (fn 155, date + seconds) -- the
+# latter is what self-timing programs (stdcbench's portme.c) use for elapsed
+# time on real hardware, at one-second resolution.  Both are driven here by the
+# deterministic code-byte virtual clock (seconds = ticks/CLOCK_HZ), so elapsed
+# *differences* stay host independent and reproducible.  CPM86_TICK_MS only
+# affects the optional 16 ms diagnostic print below, not any guest-visible time.
 TICK_MS = int(os.environ.get("CPM86_TICK_MS", "16"))
 
 
@@ -305,22 +304,16 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False,
 
     def hook_intr(uc, intno, user_data):
         if intno == 0x28:                            # RC759 XIOS interface
+            # The real RC759 XIOS does NOT maintain the deprecated Int 28h fn 19
+            # "16 ms counter" (verified on the Concurrent CP/M-86 turnkey disk:
+            # the counter never advances), so we do not emulate it either -- any
+            # Int 28h call fails loudly here.  Self-timing programs must use the
+            # BDOS T_SECONDS call (fn 155) instead, which the real machine and
+            # this runner both support.
             xios_func = uc.reg_read(UC_X86_REG_AX) & 0xFF   # AL
-            if xios_func == 19:                      # "Returns 16 ms counter"
-                # seconds since start + elapsed 16 ms periods of current second
-                secs = state["ticks"] // CLOCK_HZ if CLOCK_HZ else 0
-                rem = state["ticks"] - secs * CLOCK_HZ if CLOCK_HZ else 0
-                periods = rem * 1000 // (CLOCK_HZ * TICK_MS) if CLOCK_HZ else 0
-                if os.environ.get("CPM86_DEBUG_INT28"):
-                    print("int28/19 ticks=%d secs=%d periods=%d"
-                          % (state["ticks"], secs, periods), file=sys.stderr)
-                uc.reg_write(UC_X86_REG_DX, (secs >> 16) & 0xFFFF)
-                set_ax(secs & 0xFFFF)
-                uc.reg_write(UC_X86_REG_CX, periods & 0xFFFF)
-            else:
-                uc.emu_stop()
-                state["error"] = BdosUnimplemented(
-                    xios_func, kind="RC759 XIOS (Int 28h)")
+            uc.emu_stop()
+            state["error"] = BdosUnimplemented(
+                xios_func, kind="RC759 XIOS (Int 28h)")
             return
         if intno != 0xE0:                            # only CP/M-86 BDOS
             uc.emu_stop()
@@ -382,6 +375,17 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False,
         elif func == 105:                            # T_GET (get date/time)
             elapsed = state["ticks"] // CLOCK_HZ if CLOCK_HZ else 0
             al = _write_tod(uc, ds, dx, state["base_dt"], elapsed)
+            set_al(al)                                # AL = seconds (BCD)
+        elif func == 155:                            # T_SECONDS (date/time + seconds)
+            # Like T_GET but the SECONDS field is also stored in the TOD struct
+            # (byte at offset 4), which is exactly how stdcbench's portme.c reads
+            # elapsed time on the real RC759 -- verified there (score 13).  The
+            # real Concurrent CP/M-86 supports this call; the deprecated XIOS
+            # Int 28h fn 19 "16 ms counter" it does NOT (that XIOS never
+            # maintains the counter), so self-timing programs must use T_SECONDS.
+            elapsed = state["ticks"] // CLOCK_HZ if CLOCK_HZ else 0
+            al = _write_tod(uc, ds, dx, state["base_dt"], elapsed)
+            uc.mem_write((ds << 4) + ((dx + 4) & 0xFFFF), bytes([al]))
             set_al(al)                                # AL = seconds (BCD)
         else:
             uc.emu_stop()
