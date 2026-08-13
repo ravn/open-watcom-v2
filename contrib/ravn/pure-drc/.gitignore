@@ -8,6 +8,15 @@
 *.l86
 *.L86
 clears.l86
+# unproto: fetched source tree and the built filter binary (not vendored)
+stdcbench/unproto-src/
+stdcbench/unproto
 # but keep our own source and scripts
 !build-pure-drc.sh
 !drcify.py
+!stdcbench/transform.sh
+!stdcbench/fetch-unproto.sh
+!stdcbench/drc_enum.py
+!stdcbench/drc_reflow.py
+!stdcbench/FINDINGS.md
+!stdcbench/inc/

@@ -128,6 +128,7 @@ the same image via `cpmtools`. Point `DRC_HOME` at a directory holding them.
 | `build-pure-drc.sh` | Build with DR C + DR LINK-86 under emu2, then run in **both** emulators. Targets `sample`, `dhry`. |
 | `drcify.py` | Transform stock Dhrystone 2.1 into DR C v1.11-buildable form (see table above); benchmark logic untouched. |
 | `sample.c` | Minimal pure-DR-C `printf` smoke test (uses DR C libc + `m.init` startup). |
+| `stdcbench/` | stdcbench 0.8 on genuine DR C via **unproto** — feasibility pipeline (`transform.sh`, `fetch-unproto.sh`, `drc_enum.py`, `inc/`) and full characterization in `stdcbench/FINDINGS.md`. 10/14 modules compile through the general transforms; 4 need per-file patches (documented, not yet written). |
 
 Toolchain binaries, headers and generated `*.cmd`/`*.obj`/`*.sym` are
 gitignored.
