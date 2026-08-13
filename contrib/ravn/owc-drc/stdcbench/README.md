@@ -16,10 +16,54 @@ integer modules (the float/double modules are excluded), links, and runs:
 
 ```
 stdcbench 0.8
-stdcbench c90base score: 7
+stdcbench c90base score: 8
 stdcbench c90lib score: 5
-stdcbench final score: 12
+stdcbench final score: 13
 ```
+
+The same binary produces the identical **final score 13** on real RC759
+hardware under MAME (`../../../../../scratch/rc759-cmd-toolchain/mame-tests/scb-mame.sh`),
+confirming the Unicorn harness's numbers -- see "What the numbers mean" and
+"The clock" below.
+
+## What the numbers mean
+
+stdcbench reports one integer per module plus their sum as the **final score**;
+higher is faster. It is a *throughput* benchmark: each module runs its fixed
+workload in a loop for a set number of seconds (`SECONDS` = 8 s for `c90base`,
+40 s for `c90lib`) and counts how many whole iterations complete, then
+normalises by the actual measured elapsed time:
+
+```
+score = iterations * (1000 * SECONDS / elapsed_ms) / 100
+```
+
+So a module's score is essentially **completed-iterations-per-unit-time**, scaled
+to a small integer. Because it divides by the *measured* elapsed time, a coarse
+(1-second) clock only quantises the result, it does not bias it. Concretely, on
+the RC759 (Intel 80186 @ 6 MHz, 1984) with the genuine Digital Research C 1.11
+runtime, `c90base` manages about one full pass of its integer workload
+(compression + Huffman + insertion-sort + integer-multiply) per ~8-10 s, giving
+score **8**; the standard-library module `c90lib` (hash tables, line processing,
+peephole string matching) gives score **5**; the **final score 13** is their
+sum.
+
+What the number does and does not measure:
+
+* **Measures:** integer arithmetic (including 32-bit `long`, via the Watcom
+  `__I4M`/`__I4D` helpers) and C90 standard-library / string performance of the
+  compiled code + DR C runtime on this machine.
+* **Does NOT measure:** floating-point or math. stdcbench 0.8's `c90float` /
+  `c90double` modules are upstream stubs that return 0, and no `<math.h>` is
+  used anywhere, so the score says nothing about `double`/transcendental
+  performance (that gap is analysed separately in
+  `../../../../../scratch/rc759-cmd-toolchain/DRC_FLOAT_ANALYSIS.md`).
+
+The score is only meaningful *relative* to another run of the same benchmark
+(same compiler vs. compiler, or before vs. after an optimisation) -- there is no
+absolute "good" value. For this machine and toolchain, 13 is the current
+baseline; it is a slow score in absolute terms, exactly as expected for a 6 MHz
+1984 CPU with a pre-ANSI (non-optimising) C runtime.
 
 The scores are **reproducible, real (emulated) timings** -- see the clock
 note below.
@@ -116,28 +160,35 @@ more than the arena would grow past it. stdcbench never approaches this
 
 ## The clock
 
-`portme.c`'s `stdcbench_clock()` reads the RC759 XIOS **"16 ms counter"**
-(**Int 28h function 19**, per the PICCOLINE Programmer's Guide App. A) -- the
-machine's documented fine relative-time source -- so the benchmark measures
-genuine elapsed (emulated) time at **16 ms resolution**. The call returns a
-32-bit second count plus the elapsed 16 ms periods of the current second; we
-express it in milliseconds, so `STDCBENCH_CLOCKS_PER_SEC` is `1000`. The
-counter is deterministic (a virtual clock proportional to the code the emulated
-8086 executes), so scores are **reproducible**.
+`portme.c`'s `stdcbench_clock()` reads elapsed time via the standard Concurrent
+CP/M-86 BDOS call **T_SECONDS** (**function 155 / 0x9B**, `INT 0E0h`), which
+returns a time-of-day structure `{day, hour, min, sec}` (the seconds are BCD).
+We fold it into a monotonically increasing second count and report it in
+milliseconds, so `STDCBENCH_CLOCKS_PER_SEC` is `1000`. Under the Unicorn harness
+this BDOS clock is driven by a deterministic virtual clock (proportional to the
+code the emulated CPU executes, rate `CPM86_CLOCK_HZ`), so scores are
+**reproducible**; on real MAME hardware it reads the machine's actual
+time-of-day (the same source the Concurrent CP/M-86 status-line clock shows).
 
-The 16 ms tick replaces the earlier 1-second T_GET clock, whose coarse
-resolution made the score-normalisation fragile (a single overshooting
-iteration could underflow it to `0`). The emulated CPU rate must still be high
-enough that a heavy iteration fits its module's timing window (`SECONDS` = 8 for
-c90base, 40 for c90lib), so the build script runs `SCB.CMD` with
-`CPM86_CLOCK_HZ=700000`; the 16 ms tick then resolves the `end-start` interval
-finely. The score scales with code efficiency.
+**Why not the XIOS "16 ms counter" (Int 28h fn 19)?** The PICCOLINE Programmer's
+Guide documents that finer counter, and an earlier version of this port used it,
+but the real RC759 turnkey disk's Concurrent CP/M-86 XIOS **does not maintain
+it** -- verified: it reads 0 forever, both in a tight loop and after thousands of
+syscalls, so the timed loop never advanced and the benchmark hung after its
+banner on real hardware. T_SECONDS is coarser (1-second resolution vs. 16 ms)
+but it actually advances, and since the score formula divides by the *measured*
+elapsed time (see "What the numbers mean"), the whole-second granularity over an
+8-second window only quantises the result. The emulated CPU rate must be high
+enough that one heavy iteration fits inside its module's timing window
+(`SECONDS` = 8 for c90base, 40 for c90lib), so the build script runs `SCB.CMD`
+with `CPM86_CLOCK_HZ=700000`. Policy for this glue: use only BDOS (`INT 0E0h`)
+calls, no XIOS calls.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `portme.c` / `portme.h` | entry point (`cmain`), RC759 XIOS 16 ms clock (Int 28h fn 19), heap-base fix, module selection |
+| `portme.c` / `portme.h` | entry point (`cmain`), BDOS T_SECONDS clock (fn 155), heap-base fix, module selection |
 | `cpmlibc.c` | the ANSI routines DR C lacks (`mem*`, `strstr`, `strtol`, `ctype`) |
 | `inc/*.h` | neutral C90 headers matching DR C's small-model ABI |
 | `omf-delocal.py` | rewrites Watcom `LEXTDEF`/`LPUBDEF` so DR LINK-86 accepts the objects; `--merge-text-into-code` folds the cgsupp helper `_TEXT` into `CODE` |
