@@ -12,12 +12,37 @@
 ;   __U4D         : DX:AX / CX:BX -> DX:AX quotient, CX:BX remainder (unsigned)
 ;
 ; Placed in segment CODE / group CGROUP so they merge with DR C and the rest of
-; the Open Watcom code (see owcrt.asm), and reached by near calls (small model).
+; the Open Watcom code (see owcrt.asm).
+;
+; RETURN DISTANCE MUST FOLLOW THE CODE MODEL.  In the small model the Watcom
+; code generator reaches these helpers with a NEAR call, so a near `ret` (pop
+; IP only) is correct.  In the LARGE model every inter-module call is FAR, so
+; the compiler far-calls these helpers too (it pushes CS:IP, 4 bytes); the
+; helper must then `retf` to pop all 4.  A near `ret` in the large model pops
+; only 2 bytes, leaking the pushed CS every call -> the stack slowly unwinds
+; into garbage and the program eventually far-jumps to an unmapped segment and
+; faults.  That was the stdcbench-large early-exit (banner only): portme far-
+; called __U4M at CS 0039, which near-returned, and a few hundred K insns later
+; CS was a wild ACB8 running through unmapped memory.  Small model was fine
+; (near call + near ret matched), so the bug was large-only.
+;
+; @CodeSize is 1 under -ml (large code) and 0 under -ms (small code), so the
+; same source assembles correctly for both models -- see the RET_ macro below.
 ;
         .8086
 CGROUP  group   CODE
 CODE    segment byte public 'CODE'
         assume  cs:CODE
+
+if @CodeSize
+RET_    macro
+        retf
+        endm
+else
+RET_    macro
+        ret
+        endm
+endif
 
         public  __U4M
         public  __I4M
@@ -42,7 +67,7 @@ u4m_2:
         pop     ax              ; low(M2)
         mul     bx              ; low(M2)*low(M1) -> dx:ax
         add     dx,cx
-        ret
+        RET_
 
 ; --- unsigned 32/32 divide by binary long division ---
 ; in : DX:AX dividend, CX:BX divisor
@@ -76,7 +101,7 @@ u4d_next:
         pop     bp
         pop     di
         pop     si
-        ret
+        RET_
 
 CODE    ends
         end

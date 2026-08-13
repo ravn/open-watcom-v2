@@ -50,7 +50,16 @@ static void stdcbench_init_heap(void)
 
 stdcbench_clock_t stdcbench_clock(void)
 {
-    struct xios_tick t;
+    /* MUST be static (i.e. in DGROUP/DS), not a stack local.  The xios_tick16
+       pragma stores its result with `mov [bx],ax`, which is DS-relative.  In
+       the LARGE model DS != SS (verified: DS=1EA9 vs SS=36A9), so a stack-local
+       struct would be written through DS at the wrong linear address and read
+       back as stack garbage -- c90base()'s timed do-while (run until elapsed >=
+       8 s) would then never see time advance and spin forever (the XIOS INT 28h
+       still fires, but t.lo/hi/per are stale).  A static struct lives in DS, so
+       the DS-relative store lands on it in BOTH models.  Small model was fine
+       either way because there SS == DS == DGROUP. */
+    static struct xios_tick t;
     unsigned long    secs;
 
     xios_tick16(&t);
