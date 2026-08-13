@@ -119,13 +119,19 @@ def _load(uc, data, cmdline):
     model = _detect_model(groups)
     body = data[128:]
 
-    # Slice the body into per-group images, in header order.
-    images, off = {}, 0
-    order = []
+    # Slice the body into per-group images, in header order.  Keep EVERY group
+    # (not just code/data): the large ("compact") model links DR C's startup
+    # (CLEARL) and additional far code/data into extra/stack/auxiliary groups
+    # (CMD types 3..8) that must all be present in memory -- and described in
+    # the base page -- or the startup aborts ("You must link with LINK86 V1.2").
+    images, off = {}, 0        # first image per gtype (code/data convenience)
+    all_groups = []            # (gtype, length, minp, maxp, image) in file order
     for (gtype, length, base, minp, maxp) in groups:
         nbytes = length * 16
-        images[gtype] = body[off:off + nbytes]
-        order.append(gtype)
+        img = body[off:off + nbytes]
+        if gtype not in images:
+            images[gtype] = img
+        all_groups.append((gtype, length, minp, maxp, img))
         off += nbytes
 
     code_img = images.get(bin2cmd.G_CODE, b"")
@@ -145,23 +151,24 @@ def _load(uc, data, cmdline):
         uc.mem_write(data_seg << 4, data_img)
         entry_ip = 0x0000                        # small/compact enter at CS:0000
 
-        # The CCP allocates the data group up to its maximum (G_MAX paragraphs)
-        # and records that *allocated* size -- not just the initialised image --
-        # in the base page's data length field (LD, offset 06H). DR C's own
-        # startup (m.init.stack) initialises SP from LD ("mov sp,6[bx]") for
-        # small-model programs, so LD must span the whole segment the program
-        # was given; otherwise the stack lands on top of the data/heap and the
-        # program crashes. Allocate G_MAX (clamped to a full 64K segment),
-        # falling back to G_MIN / the image size when no maximum is given.
+        # Give the data group a full 64K segment by default (matching CP/M-86's
+        # CCP and emu2's proven loader): the bootstrap stack lives at SS:SP =
+        # data_seg:0xFFFE (set below) and the base page's LD field (offset 06H)
+        # doubles as the stack top DR C's startup reads ("mov sp,6[bx]"), so the
+        # data group must span the whole segment.  Only shrink below 64K when the
+        # descriptor's G_MAX explicitly asks for less.  This matters for the
+        # large model, whose data descriptor carries G_MAX = 0: without a full
+        # segment the bootstrap stack would land on top of the following
+        # (extra/stack/aux) groups.
+        img_paras = (len(data_img) + 15) // 16
         data_desc = next((g for g in groups
                           if g[0] == bin2cmd.G_DATA), None)
-        img_paras = (len(data_img) + 15) // 16
+        alloc_paras = 0x1000                      # 64K
         if data_desc is not None:
             _, _, _, dminp, dmaxp = data_desc
-            alloc_paras = dmaxp if dmaxp else max(dminp, img_paras)
-        else:
-            alloc_paras = img_paras
-        alloc_paras = max(min(alloc_paras, 0x1000), img_paras)  # cap at 64K
+            if dmaxp and dmaxp >= img_paras and dmaxp < 0x1000:
+                alloc_paras = dmaxp
+        alloc_paras = max(alloc_paras, img_paras)
         data_len = alloc_paras * 16              # LD = data_len - 1
 
     # Build the base page from the command line and write it into the data
@@ -170,6 +177,38 @@ def _load(uc, data, cmdline):
     bp = ccp.build_base_page(model=model, code_seg=code_seg, code_len=code_len,
                              data_seg=data_seg, data_len=data_len,
                              fcb1=fcb1, fcb2=fcb2, tail=tail)
+
+    # Large ("compact") model: place and describe the remaining groups.  CP/M-86
+    # gives each group (extra=3, stack=4, auxiliary 1..4 = 5..8) its own segment
+    # and records base+length in a 6-byte base-page descriptor:
+    #   +0 length in BYTES (24-bit)  +3 segment paragraph (word)  +5 model flag.
+    # DR C's large-model startup (CLEARL) walks these descriptors; if the extra
+    # code/data groups are absent or undescribed it aborts with "You must link
+    # with LINK86 V1.2".  The small/8080 models simply have none of these groups,
+    # so this loop is a no-op there and their setup is unchanged.
+    DESC_OFF = {0x03: 0x0C, 0x04: 0x12,      # extra, stack
+                0x05: 0x18, 0x06: 0x1E,      # aux 1, aux 2
+                0x07: 0x24, 0x08: 0x2A}      # aux 3, aux 4
+    free_seg = data_seg + (data_len + 15) // 16   # first paragraph past data
+    for (gtype, length, minp, maxp, img) in all_groups:
+        off = DESC_OFF.get(gtype)
+        if off is None:                          # code/data handled above
+            continue
+        want = maxp if (maxp and maxp >= length) else max(minp, length)
+        want = max(want, 1)
+        seg = free_seg
+        free_seg += want
+        uc.mem_write(seg << 4, b"\x00" * (want * 16))   # zero-fill (BSS)
+        if img:
+            uc.mem_write(seg << 4, img)                 # initialised part
+        nbytes = want * 16
+        bp[off + 0] = nbytes & 0xFF
+        bp[off + 1] = (nbytes >> 8) & 0xFF
+        bp[off + 2] = (nbytes >> 16) & 0xFF
+        bp[off + 3] = seg & 0xFF
+        bp[off + 4] = (seg >> 8) & 0xFF
+        bp[off + 5] = 0                                  # model flag (0 = 8086)
+
     uc.mem_write(data_seg << 4, bytes(bp))
 
     # Segment registers per memory model (System Guide Section 2.3-2.5).
