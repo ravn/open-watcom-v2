@@ -432,6 +432,19 @@ system begin com
     format dos com
 :endsegment
 end
+system begin cpm86
+:segment Pspecs
+    ARCH i86 -bt=cpm86
+:elsesegment Pwlsystem
+    option osname='CP/M-86'
+    libpath '%WATCOM%/lib286'
+    libpath '%WATCOM%/lib286/cpm86'
+    libfile cstartcpm.obj
+    option dosseg
+    option nodefaultlibs
+    format cpm86
+:endsegment
+end
 system begin qnx
 :segment Pspecs
     ARCH i86 -bt=qnx
