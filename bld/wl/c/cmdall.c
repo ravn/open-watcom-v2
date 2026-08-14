@@ -45,6 +45,7 @@
 #include "cmd16m.h"
 #include "cmdphar.h"
 #include "cmdrdv.h"
+#include "cmdcpm86.h"
 #include "cmdqnx.h"
 #include "cmdelf.h"
 #include "cmdraw.h"
@@ -2086,6 +2087,9 @@ static parse_entry  Models[] = {
 #endif
 #ifdef _RDOS
     "RDos",         ProcRdosFormat,     MK_RDOS, 0,
+#endif
+#ifdef _CPM86
+    "CPM86",        ProcCPM86Format,    MK_CPM86, 0,
 #endif
 #ifdef _RAW
     "Raw",          ProcRawFormat,      MK_RAW, 0,

@@ -57,6 +57,7 @@
 #include "loadqnx.h"
 #include "loadelf.h"
 #include "loadrdv.h"
+#include "loadcpm86.h"
 #include "loadraw.h"
 #include "loadfile.h"
 #include "objstrip.h"
@@ -329,6 +330,12 @@ static void finiLoad( void )
 #ifdef _RDOS
     if( FmtData.type & MK_RDOS ) {
         FiniRdosLoadFile();
+        return;
+    }
+#endif
+#ifdef _CPM86
+    if( FmtData.type & MK_CPM86 ) {
+        FiniCPM86LoadFile();
         return;
     }
 #endif

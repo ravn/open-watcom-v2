@@ -2,8 +2,7 @@
 *
 *                            Open Watcom Project
 *
-* Copyright (c) 2002-2020 The Open Watcom Contributors. All Rights Reserved.
-*    Portions Copyright (c) 1983-2002 Sybase, Inc. All Rights Reserved.
+* Copyright (c) 2026 The Open Watcom Contributors. All Rights Reserved.
 *
 *  ========================================================================
 *
@@ -25,19 +24,67 @@
 *
 *  ========================================================================
 *
-* Description:  Linker output formats configuration.
+* Description:  Command line parsing for the CP/M-86 .CMD load file format.
 *
 ****************************************************************************/
 
 
-/* linker configured output formats */
-#define _EXE            0
-#define _QNX            1
-#define _OS2            2
-#define _PHARLAP        3
-#define _NOVELL         4
-#define _DOS16M         5
-#define _ELF            6
-#define _RAW            7
-#define _RDOS           8
-#define _CPM86          9
+#include <string.h>
+#include "linkstd.h"
+#include "cmdutils.h"
+#include "cmdall.h"
+#include "cmdline.h"
+#include "cmdcpm86.h"
+
+
+#ifdef _CPM86
+
+void SetCPM86Fmt( void )
+/***********************
+ * nothing format-specific to initialise for phase 1 (small / 8080 model,
+ * base=0, no fixups).
+ */
+{
+}
+
+void FreeCPM86Fmt( void )
+/***********************/
+{
+}
+
+
+/****************************************************************
+ * "Format" Directive
+ ****************************************************************/
+
+static bool ProcSmall( void )
+/****************************
+ * small model: separate CODE (type 1) + DATA (type 2) groups.
+ */
+{
+    return( true );
+}
+
+static bool Proc8080( void )
+/***************************
+ * 8080 model: single group, loader sets CS=DS=SS=ES.
+ */
+{
+    return( true );
+}
+
+static parse_entry  CPM86SubFormats[] = {
+    "SMall",        ProcSmall,      MK_CPM86, 0,
+    "8080",         Proc8080,       MK_CPM86, 0,
+    NULL
+};
+
+bool ProcCPM86Format( void )
+/**************************/
+{
+    ProcOne( CPM86SubFormats, SEP_NO );
+    FmtData.def_ext = E_CMD;
+    return( true );
+}
+
+#endif

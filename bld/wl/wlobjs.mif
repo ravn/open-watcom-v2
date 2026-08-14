@@ -36,6 +36,7 @@ common_objs = &
     $(_subdir_)cmdos2.obj &
     $(_subdir_)cmdphar.obj &
     $(_subdir_)cmdrdv.obj &
+    $(_subdir_)cmdcpm86.obj &
     $(_subdir_)cmdraw.obj &
     $(_subdir_)cmdutils.obj &
     $(_subdir_)cmdqnx.obj &
@@ -67,6 +68,7 @@ common_objs = &
     $(_subdir_)loadqnx.obj &
     $(_subdir_)loadraw.obj &
     $(_subdir_)loadrdv.obj &
+    $(_subdir_)loadcpm86.obj &
     $(_subdir_)lsymtab.obj &
     $(_subdir_)mapio.obj &
     $(_subdir_)mixcache.obj &

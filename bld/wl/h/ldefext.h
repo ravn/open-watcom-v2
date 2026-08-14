@@ -69,4 +69,5 @@ pick( E_ILK,      "ilk" )
 pick( E_HEX,      "hex" )
 pick( E_BIN,      "bin" )
 pick( E_RDV,      "rdv" )   /* RDOS device driver */
+pick( E_CMD,      "cmd" )   /* CP/M-86 command file */
 pick( E_EFI,      "efi" )   /* EFI */
