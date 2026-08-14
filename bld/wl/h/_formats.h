@@ -54,4 +54,5 @@ pick_format( 0x00010000, MK_WIN_VXD,       16, "Windows VxD",          "Windows 
 pick_format( 0x00020000, MK_DOS16M,        17, "DOS/16M",              "DOS/16M" ) \
 pick_format( 0x00040000, MK_RAW,           18, "RAW Binary Image",     "Raw" ) \
 pick_format( 0x00080000, MK_RDOS_32,       19, "RDOS",                 "RDOS" ) \
-pick_format( 0x00100000, MK_RDOS_16,       20, "RDOS 16-bit",          "RDOS 16-bit" )
+pick_format( 0x00100000, MK_RDOS_16,       20, "RDOS 16-bit",          "RDOS 16-bit" ) \
+pick_format( 0x00200000, MK_CPM86,         21, "CP/M-86",              "CP/M-86" )

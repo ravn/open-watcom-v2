@@ -45,6 +45,7 @@
 #include "cmdphar.h"
 #include "cmddos.h"
 #include "cmdrdv.h"
+#include "cmdcpm86.h"
 #include "cmdraw.h"
 #include "cmdline.h"
 #include "overlays.h"
@@ -116,6 +117,9 @@ static const select_format PossibleFmt[] = {
 #endif
 #ifdef _RDOS
     MK_RDOS,        "LIBRDOS",      SetRdosFmt,     FreeRdosFmt,
+#endif
+#ifdef _CPM86
+    MK_CPM86,       "LIBCPM86",     SetCPM86Fmt,    FreeCPM86Fmt,
 #endif
     0,              NULL,           NULL,           NULL
 };

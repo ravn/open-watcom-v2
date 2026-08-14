@@ -2,8 +2,7 @@
 *
 *                            Open Watcom Project
 *
-* Copyright (c) 2002-2020 The Open Watcom Contributors. All Rights Reserved.
-*    Portions Copyright (c) 1983-2002 Sybase, Inc. All Rights Reserved.
+* Copyright (c) 2026 The Open Watcom Contributors. All Rights Reserved.
 *
 *  ========================================================================
 *
@@ -25,19 +24,16 @@
 *
 *  ========================================================================
 *
-* Description:  Linker output formats configuration.
+* Description:  Command line parsing for the CP/M-86 .CMD load file format.
 *
 ****************************************************************************/
 
 
-/* linker configured output formats */
-#define _EXE            0
-#define _QNX            1
-#define _OS2            2
-#define _PHARLAP        3
-#define _NOVELL         4
-#define _DOS16M         5
-#define _ELF            6
-#define _RAW            7
-#define _RDOS           8
-#define _CPM86          9
+#ifdef _CPM86
+
+extern void SetCPM86Fmt( void );
+extern void FreeCPM86Fmt( void );
+
+extern bool ProcCPM86Format( void );
+
+#endif
