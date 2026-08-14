@@ -106,10 +106,14 @@ void FiniCPM86LoadFile( void )
         ndesc++;
     }
 
-    CurrSect = Root;
-    SeekLoad( 0 );                      /* overwrite the reserved header */
-    WriteLoad( header, sizeof( header ) );
+    /* Append any debug info AFTER the group images (the CMD loader ignores
+     * trailing bytes) -- must happen before we seek back to write the header,
+     * else it would overwrite the images at offset 128. */
     DBIWrite();
+
+    CurrSect = Root;
+    SeekLoad( 0 );                      /* rewrite the reserved 128-byte header last */
+    WriteLoad( header, sizeof( header ) );
 }
 
 #endif
