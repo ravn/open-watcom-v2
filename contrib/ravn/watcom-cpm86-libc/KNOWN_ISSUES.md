@@ -224,6 +224,12 @@ Recorded here so they are not lost; no action taken now.
   INT 21h `xchg_vects`). Deferred to a contributor with 8087 hardware; RC759
   has no 8087, so `-fpc` soft-float is the production path
   (see #6 / `docs/8087_HARDWARE_SUPPORT_DEFERRED.md`).
+- **DDT86/SID86 debug symbols in the .CMD** — investigate how the DRI
+  debuggers DDT86 and SID86 receive symbol/debug information (symbol table
+  format), and whether Open Watcom `wlink` can embed it directly in the `.CMD`
+  file. Today the cpm86 writer appends debug info AFTER the group images (the
+  CMD loader ignores trailing bytes), but DDT86/SID86 consumption is
+  unverified. "Check later", enhancement.
 
 ### 9. ibm5150 CP/M-86 1.0 fallback verification — PARKED (memory-capped)
 
