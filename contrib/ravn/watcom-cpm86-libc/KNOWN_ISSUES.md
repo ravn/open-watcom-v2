@@ -230,16 +230,14 @@ Recorded here so they are not lost; no action taken now.
   file. Today the cpm86 writer appends debug info AFTER the group images (the
   CMD loader ignores trailing bytes), but DDT86/SID86 consumption is
   unverified. "Check later", enhancement.
-- **CP/M-86 8080 memory model** — `wlink FORMAT CPM86 8080` is presently a
-  phase-1 no-op (`ProcSmall`/`Proc8080` both return without effect); the writer
-  always emits the small model (verified: a real `.cmd` has two descriptors,
-  type-1 CODE + type-2 DATA). A genuine 8080 image needs a SINGLE combined
-  type-1 group so the loader sets CS=DS=SS=ES (base-page 8080 flag `0x01`) —
-  i.e. a single-segment / tiny link layout in wlink plus a new `crt08080.asm`;
-  a small-model link cannot simply be concatenated (data offsets would point
-  wrong). Then build + validate on real RC759 under MAME. The 8080 sub-option
-  is currently omitted from the Linker Guide until it is implemented and
-  MAME-validated. Non-blocker.
+- **CP/M-86 8080 memory model** — `wlink FORMAT CPM86 8080` is now a fatal
+  error (E3058 "8080 option not valid for a CP/M-86 executable"); only the
+  MAME-validated small model is accepted. A genuine 8080 image needs a SINGLE
+  combined type-1 group so the loader sets CS=DS=SS=ES (base-page 8080 flag
+  `0x01`) — i.e. a single-segment / tiny link layout in wlink plus a new
+  `crt08080.asm`; a small-model link cannot simply be concatenated (data
+  offsets would point wrong). Once implemented, build + validate on real RC759
+  under MAME, then re-enable the sub-option and document it. Non-blocker.
 
 ### 9. ibm5150 CP/M-86 1.0 fallback verification — PARKED (memory-capped)
 
