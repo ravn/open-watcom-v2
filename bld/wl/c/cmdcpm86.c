@@ -60,6 +60,7 @@ void FreeCPM86Fmt( void )
 static bool ProcSmall( void )
 /****************************
  * small model: separate CODE (type 1) + DATA (type 2) groups.
+ * This is the only validated (MAME-verified on RC759) memory model.
  */
 {
     return( true );
@@ -67,9 +68,11 @@ static bool ProcSmall( void )
 
 static bool Proc8080( void )
 /***************************
- * 8080 model: single group, loader sets CS=DS=SS=ES.
+ * 8080 model: single group, loader sets CS=DS=SS=ES.  Not yet implemented
+ * or validated, so reject it -- only validated models are accepted.
  */
 {
+    LnkMsg( FTL+LOC+LINE+MSG_FORMAT_BAD_OPTION, "s", "8080" );
     return( true );
 }
 
