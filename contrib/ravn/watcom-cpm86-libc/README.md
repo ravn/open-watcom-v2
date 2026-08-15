@@ -1,6 +1,8 @@
 # watcom-cpm86-libc — retargeting Open Watcom's own C library to CP/M-86
 
 Tracking issue: **ravn/rc7xx-work#6**.
+For the porting *story* (the pivot, milestones, and verification method) see
+[`PORTING.md`](PORTING.md); for remaining gaps see [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).
 
 **Status:** foundation **proven end-to-end** (run-verified under emu2). This
 directory demonstrates that Open Watcom's *own* clib can be retargeted to
