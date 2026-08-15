@@ -10,3 +10,7 @@ build-owtests/
 build-owtests-mame/
 build-diskio/
 build-diskio-mame/
+build-cpp/
+cppfeat.cmd
+mame_cpptest.cmd
+hello_ios.cmd

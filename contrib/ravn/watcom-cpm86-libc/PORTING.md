@@ -95,6 +95,16 @@ backs it. Commit hashes are on `master`.
     leaks locks until the BDOS aborts the program to the CCP — a bug emu2
     (which models no lock list) never showed, only the real RC759 did. F_SFIRST
     reads the directory entry with no lock and no close (`9e013e363b`).
+15. **C++ layer** — Watcom's own **iostreams** (`cout`/`cin`/`cerr`),
+    **exceptions** (`try`/`throw`/`catch`, unwinding) and **`setjmp`/`longjmp`**
+    layered over the disk FILE\* seam, MAME rc759-verified (`cppfeat` 8/0,
+    `mame_cpptest` 6/0). Only three seams beyond the C port: `port/cpprt.c`
+    (`__clib_malloc`/`__clib_free` → Watcom `nmalloc`/`nfree`), `port/ehsupp.c`
+    (near `__longjmp_handler`, overlay-stack nulls, `__clib_exit`/`__clib_fatal`),
+    and a C++-aware startup `port/crt0cpp.asm` that walks the `XI`/`YI` global
+    ctor/dtor tables (the one thing plain C never needs). This retargets the C++
+    layer that first ran on a hand-written scratch mini-clib onto Open Watcom's
+    own library (ravn/rc7xx-work#9, consolidated under #12).
 
 ## Result
 

@@ -159,6 +159,40 @@ random-record BDOS calls (fn 33/34) with per-record DMA (fn 26/51).
 
 ---
 
+## C++ layer (`build-cpp.sh`, `port/crt0cpp.asm`, `port/cpprt.c`, `port/ehsupp.c`)
+
+### C1. emu2 crashes on the C++ runtime's FF-form opcodes — process note
+
+The C++ iostream/EH runtime uses a few `FF`-group encodings that `emu2`
+(`scratch/cpm86-tools/emu2-cpm86/emu2`) does not implement, so a C++ `.CMD`
+can HALT / hit "unimplemented opcode" on emu2 even when it is correct. This is
+an emu2 gap, not a port bug: the same binaries pass on the full-8086 **MAME
+rc759** oracle (`cppfeat` 8/0, `mame_cpptest` 6/0). Treat MAME as authoritative
+for the C++ layer; emu2 is at best a partial smoke test here. (The original
+global-ctor crash also first surfaced on emu2 — see C2.)
+
+### C2. C++ global constructors need `crt0cpp.asm`, not the minimal C crt0 — RESOLVED
+
+Predefined `cout`/`cin`/`cerr` (and any user global object) are constructed via
+Watcom's `XI` (ctor) / `YI` (dtor) startup records. The minimal C `port/crt0sm.asm`
+does not walk them, so a C++ build linked with it constructs nothing and the
+first `std::cout <<` dereferences an uninitialised streambuf (HALT / opcode-`FF`
+crash before any output). Fixed by `port/crt0cpp.asm`, which brackets
+`XIB/XI/XIE`+`YIB/YI/YIE` into `DGROUP` and runs `__init_rtns` before `main` /
+`__fini_rtns` after. Empty tables are a no-op, so it is safe for pure C — but
+the seven C targets deliberately keep the leaner `crt0sm.asm`; only C++ builds
+use `crt0cpp.asm`.
+
+### C3. `__longjmp_handler` must be NEAR — LIMIT (carried from design)
+
+`port/ehsupp.c`'s `__longjmp_handler` is a **near** routine. A far version would
+`retf` against `longjmp`'s near `call` and unbalance the stack — and because
+C++ EH overwrites the handler pointer at throw time, a far handler breaks C
+`setjmp`/`longjmp` while C++ EH still appears to work (a confusing split
+failure). Keep it near.
+
+---
+
 ## Float / 8087
 
 ### 5. `INT34-3D` purity gate false-positives on libm tables — BUG (tooling)
