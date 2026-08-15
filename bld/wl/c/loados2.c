@@ -639,7 +639,11 @@ unsigned long ResNonResNameTable( bool dores )
     }
     if( dores
       || len > 0 ) {
-        size += WriteLoadU8Name( name, len, false );
+        /*
+         * MK_OS2_FLAT | MK_OS2_NE | MK_WIN_NE | MK_WIN_VXD
+         * output upper-cased name to resident name table
+         */
+        size += WriteLoadU8Name( name, len, true );
         WriteLoadU16( 0 );
         size += 2;
     }
@@ -1114,10 +1118,11 @@ void FiniOS2LoadFile( void )
     } else {
         adseg = 0;    // no automatic data segment.
     }
-    if( FmtData.u.os2fam.flags & PM_NOT_COMPATIBLE ) {
-        exe_head.info |= OS2_NOT_PM_COMPATIBLE;
-    } else if( FmtData.u.os2fam.flags & PM_APPLICATION ) {
+    if( (FmtData.type & MK_WIN_NE)
+      || (FmtData.u.os2fam.flags & PM_APPLICATION) ) {
         exe_head.info |= OS2_PM_APP;
+    } else if( FmtData.u.os2fam.flags & PM_NOT_COMPATIBLE ) {
+        exe_head.info |= OS2_NOT_PM_COMPATIBLE;
     } else {
         exe_head.info |= OS2_PM_COMPATIBLE;
     }
