@@ -20,6 +20,7 @@ The format of the "FORMAT" directive (short form "FORM") is as follows.
             | QNX [FLAT]
             | ELF [DLL]
             | RDOS [DEV | BIN | MBOOT]
+            | CPM86 [SMALL | 8080]
 
     win_dll_attrs ::= DLL [INITGLOBAL | INITINSTANCE]
 
@@ -494,6 +495,22 @@ ELF format DLLs can also be created.
 For more information on ELF executable file formats,
 see the chapter entitled :HDREF refid='elfchap'..
 .do end
+.mnote CPM86
+tells the &lnkname to generate a CP/M-86 ".cmd" command file.
+.np
+The name of the executable file will have extension "cmd".
+Note that this default extension can be overridden by using the
+"NAME" directive to name the executable file.
+.np
+Specifying "SMALL" selects the small memory model (separate code and
+data groups).
+Specifying "8080" selects the 8080 memory model (a single group
+holding both code and data).
+Only these two memory models are supported.
+.np
+Group images are emitted at paragraph granularity with base paragraph
+zero; no relocation fixup table is generated, so the program must not
+contain any segment relocations.
 .esynote
 .np
 If no "FORMAT" directive is specified, the executable file format will
