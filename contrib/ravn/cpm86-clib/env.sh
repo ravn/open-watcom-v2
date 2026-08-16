@@ -8,8 +8,10 @@
 # %WATCOM%/lib286/cpm86) and WLINK_LNK at the config that defines `system
 # cpm86` (without it wlink reports "undefined system name: cpm86").
 #
-# NOTE: run contrib/ravn/cpm86-clib/build.sh once (and after every clean.sh) to
-# regenerate lib286/cpm86/{cstartcpm.obj,clibs.lib} from source.
+# NOTE: run contrib/ravn/watcom-cpm86-libc/build-lib.sh once (and after every
+# clean) to build the FULL clib and install it as the canonical
+# lib286/cpm86/{cstartcpm.obj,clibs.lib}. (The old 4-module cpm86-clib/build.sh
+# stub is superseded.)
 _OW="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../../.." && pwd)"
 _B="$_OW/bld"
 _BIN="${TMPDIR:-/tmp}/owcc-cpm86-bin"
@@ -24,4 +26,7 @@ export PATH="$_BIN:$PATH"
 export WATCOM="$_OW"
 export OWROOT="$_OW"
 export WLINK_LNK="$_B/wl/lnk/osxa64/wlink.lnk"
+# Header search for a bare `owcc -bcpm86 prog.c` (owcc does not set these for
+# the cpm86 target itself). Mirrors the -I list used by the UnZip build.
+export INCLUDE="$_B/clib/h:$_B/clib/intel/h:$_B/watcom/h:$_B/lib_misc/h:$_B/hdr/dos/h"
 echo "owcc -bcpm86 environment ready (WATCOM=$WATCOM)"

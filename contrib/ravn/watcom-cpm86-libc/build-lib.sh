@@ -194,4 +194,22 @@ echo "==> built $OUTDIR/clibcpm.lib + $OUTDIR/crt0.obj"
 ls -l clibcpm.lib crt0.obj
 echo "modules in archive:"
 "$WLIB" clibcpm.lib 2>/dev/null | grep -c '\.obj' || true
+
+# Install as the CANONICAL cpm86 standard library.
+#
+# owcc -bcpm86 links via `system cpm86` (bld/wl/lnk/osxa64/wlink.lnk): it does
+#   libfile cstartcpm.obj          <- the C startup, auto-linked
+#   libpath '%WATCOM%/lib286/cpm86' <- where the auto-fetched clib is searched
+# and the compiled objects carry a default-library record naming `clibs`, so
+# wlink auto-fetches clibs.lib from that dir. Dropping the FULL clib in as
+# clibs.lib (and crt0.obj as cstartcpm.obj) makes a bare
+#   owcc -bcpm86 prog.c -o PROG.CMD
+# link the whole library + real startup with NO explicit `library`/`file` on
+# the link line — superseding the old 4-module proof-of-concept stub
+# (contrib/ravn/cpm86-clib/build.sh). lib286/cpm86 is a .gitignored install dir.
+DEST="$OW/lib286/cpm86"
+mkdir -p "$DEST"
+cp clibcpm.lib "$DEST/clibs.lib"
+cp crt0.obj    "$DEST/cstartcpm.obj"
+echo "==> installed canonical: $DEST/{clibs.lib,cstartcpm.obj}"
 echo "DONE."
