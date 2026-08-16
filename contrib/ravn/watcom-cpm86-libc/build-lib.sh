@@ -74,6 +74,15 @@ cw convert/c/lltoa.c     lltoa.obj
 cw convert/c/alphabet.c  alphabet.obj
 cw mbyte/c/wctomb.c      wctomb.obj
 
+echo "==> Layer 1: string-to-number + strtok + toupper + setvbuf (editor deps)"
+cw convert/c/atoi.c      atoi.obj
+cw convert/c/strtol.c    strtol.obj
+cw string/c/strtok.c     strtok.obj
+cw string/c/setbits.c    setbits.obj
+cw string/c/bits.c       bits.obj
+cw char/c/toupper.c      toupper.obj
+cw streamio/c/setvbuf.c  setvbuf.obj
+
 echo "==> Layer 1: __prtf formatter core"
 cw streamio/c/prtf.c     prtf.obj
 cw streamio/c/noefgfmt.c noefgfmt.obj
@@ -173,6 +182,7 @@ rm -f clibcpm.lib
     +strnicmp.obj +strchr.obj +strrchr.obj +strupr.obj +strerror.obj \
     +sprintf.obj +vsprintf.obj +istable.obj \
     +itoa.obj +ltoa.obj +lltoa.obj +alphabet.obj +wctomb.obj \
+    +atoi.obj +strtol.obj +strtok.obj +setbits.obj +bits.obj +toupper.obj +setvbuf.obj \
     +prtf.obj +noefgfmt.obj \
     +printf.obj +fprintf.obj +fprtf.obj +fputc.obj +fputs.obj +puts.obj \
     +fwrite.obj +flush.obj +fflush.obj +perror.obj \
