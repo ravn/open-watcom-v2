@@ -14,7 +14,7 @@
 # x87), pure-software __FDxemu path (__real87==0), no INT 21h, purity-gated.
 set -e
 cd "$(dirname "$0")"
-OW="${OW:-/Users/ravn/z80/scratch/open-watcom-v2}"; B="$OW/bld"
+OW="${OW:-$(cd "$(dirname "$0")/../../.." && pwd)}"; B="$OW/bld"
 WCC="$B/cc/i86/osxa64/binbuild/wcc.exe"
 WASM="$B/wasm/osxa64/wasm.exe"
 WLINK="$B/wl/osxa64/wlink.exe"

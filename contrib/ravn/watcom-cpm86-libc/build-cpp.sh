@@ -21,7 +21,7 @@
 # NEVER search outside /Users/ravn/z80/.
 set -e
 cd "$(dirname "$0")"
-OW="${OW:-/Users/ravn/z80/scratch/open-watcom-v2}"; B="$OW/bld"
+OW="${OW:-$(cd "$(dirname "$0")/../../.." && pwd)}"; B="$OW/bld"
 WCC="$B/cc/i86/osxa64/binbuild/wcc.exe"
 WPP="$B/plusplus/i86/osxa64/wpp.exe"
 WASM="$B/wasm/osxa64/wasm.exe"
