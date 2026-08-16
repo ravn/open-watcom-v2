@@ -855,7 +855,13 @@ _WCRTLINK int stat( const char *name, struct stat *buf )
     }
 
     /* Size via F_SIZE (fn 35): fills the FCB random record with the file's size
-       in 128-byte records, straight off the directory -- no open, no lock. */
+       in 128-byte records, straight off the directory -- no open, no lock. That
+       is only 128-byte-granular, so on CP/M 3+ (CCP/M-86) we additionally OPEN
+       with the LRBC probe (FCB+32 = 0xFF) to recover the exact byte length of
+       the final record -- WITHOUT it, stat() reports a record-rounded st_size
+       (e.g. 384 for a 358-byte file) while the open handle reads the exact 358,
+       and the mismatch derails length-driven callers such as UnZip's
+       end-of-central-directory scan (G.ziplen = statbuf.st_size). */
     name_to_fcb( name, fcb );
     _bdos( BD_FILESIZE, (unsigned)(size_t)&fcb[0] );
     records = (long)fcb[FCB_R0 + 0]
@@ -863,7 +869,18 @@ _WCRTLINK int stat( const char *name, struct stat *buf )
             | ((long)fcb[FCB_R0 + 2] << 16);
 
     memset( buf, 0, sizeof( *buf ) );
-    buf->st_size = records * SECT;                    /* record-rounded (probe) */
+    buf->st_size = records * SECT;                    /* record-rounded default */
+    if( records > 0 && os_has_lrbc() ) {
+        unsigned char ofcb[36];
+        name_to_fcb( name, ofcb );
+        ofcb[FCB_LRBC] = 0xFF;                        /* ask CP/M 3+ for the LRBC */
+        if( _bdos( BD_OPEN, (unsigned)(size_t)&ofcb[0] ) != 0xFF ) {
+            unsigned char lrbc = ofcb[FCB_LRBC];
+            _bdos( BD_CLOSE, (unsigned)(size_t)&ofcb[0] );
+            if( lrbc != 0xFF )                        /* exact final-record length */
+                buf->st_size = (records - 1) * SECT + (lrbc == 0 ? SECT : lrbc);
+        }
+    }
 
     perm = S_IREAD;                                  /* every CP/M file is readable */
     if( !(ent[FCB_TYPE] & 0x80) )                    /* R/O bit clear => writable */

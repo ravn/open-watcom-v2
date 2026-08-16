@@ -14,3 +14,7 @@ build-cpp/
 cppfeat.cmd
 mame_cpptest.cmd
 hello_ios.cmd
+build-lib/
+build-diskio-ibm/
+build-fscanf/
+build-streamio/

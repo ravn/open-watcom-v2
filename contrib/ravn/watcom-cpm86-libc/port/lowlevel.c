@@ -35,16 +35,26 @@ unsigned _curbrk = 0;
    DGROUP. Watcom links heap blocks by DGROUP-near pointers, so an in-DGROUP
    array is exactly the right backing store. 20 KB is well above stdcbench's
    ~1.5 KB measured high-water mark, with margin for the c90lib hash tables. */
-#define WC_ARENA_BYTES  20480u
+#define WC_ARENA_BYTES  36352u   /* 0x8E00: maxed against 64K DGROUP ceiling (leaves ~70B headroom) */
 static char wc_arena[WC_ARENA_BYTES];
 
 /* Seed _curbrk to the arena base. MUST run before the first malloc, because
    grownear.c reads _curbrk (new_brk = amount + _curbrk) BEFORE it calls
    __brk(); a zero _curbrk would make new_brk a raw size, not an address.
-   Called from crt0sm.asm (wc_heap_init_) ahead of main. */
+   Called from crt0sm.asm (wc_heap_init_) ahead of main.
+
+   Also shrink _amblksiz (Watcom's heap-grab granularity, default 4-8 KB) to
+   one paragraph. grownear.c rounds every miniheap grab UP to _amblksiz; with
+   the default 8 KB, UnZip's single 32 KB request (the zcalloc(8192,4) inflate
+   window / STORED copy buffer) rounds to 40 KB and overruns our ~35 KB arena,
+   so the alloc fails. A 16-byte granularity keeps the roundup waste negligible
+   so the 32 KB window fits alongside the I/O and CRC buffers in the arena. */
+extern unsigned _amblksiz;   /* Watcom clib heap-grab granularity (amblksiz.c) */
+
 void wc_heap_init( void )
 {
     _curbrk = (unsigned)&wc_arena[0];
+    _amblksiz = 16u;
 }
 
 /* __brk -- set the heap top to brk_value and return the PREVIOUS top (the base

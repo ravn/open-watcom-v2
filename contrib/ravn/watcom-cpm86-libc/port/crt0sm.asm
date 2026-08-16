@@ -24,12 +24,54 @@ _cstart_:
 ; build (see port/cominit.c): empty for the cprintf-only demos, __InitFiles for
 ; stdio builds, +__setEFGfmt for float-printing builds.
         call    __CommonInit_
-; ow#3 streamio: Watcom's main(argc,argv) is __watcall -- argc in AX, argv in DX
-; -- and the object also EXTRNs the global __argc marker. We have no command
-; tail parser, so synthesise argv = { "IOTEST", NULL }: enough for the streamio
-; clibtest's strlwr(argv[0]) banner. Harmless to arg-less mains in other builds.
-        mov     ax, 1                   ; argc = 1
-        mov     dx, offset DGROUP:__argv
+; ow#3 streamio: Watcom's main(argc,argv) is __watcall -- argc in AX, argv in DX.
+; Parse the CP/M-86 command tail (base page DS:0080h = length byte, DS:0081h.. =
+; characters, space-separated) into a real argv vector so hosted programs like
+; UnZip see their operands.  argv[0] is a fixed program name; tokens are
+; NUL-terminated in place (we own the base-page scratch) and their offsets stored
+; in _argvtab.  Example: tail " -l TEST.ZIP" -> argc=3,
+; argv={"UNZIP","-l","TEST.ZIP",NULL}.
+        mov     di, offset DGROUP:_argvtab
+        mov     ax, offset DGROUP:_prog0
+        mov     [di], ax                ; argv[0] = program name
+        add     di, 2
+        mov     bx, 1                   ; argc = 1
+        mov     si, 81h                 ; first command-tail character
+        mov     cl, byte ptr ds:[80h]   ; tail length
+        xor     ch, ch
+        mov     bp, si
+        add     bp, cx                  ; bp = one past last tail char
+ct_skip:
+        cmp     si, bp
+        jae     ct_done                 ; end of tail -> stop
+        cmp     byte ptr [si], ' '
+        jne     ct_tok                  ; non-space starts a token
+        inc     si
+        jmp     ct_skip
+ct_tok:
+        cmp     bx, 32                  ; argv table guard (32 slots)
+        jae     ct_done
+        mov     [di], si                ; argv[argc] = token start
+        add     di, 2
+        inc     bx
+ct_scan:
+        cmp     si, bp
+        jae     ct_end                  ; token runs to end of tail
+        cmp     byte ptr [si], ' '
+        je      ct_cut                  ; space ends the token
+        inc     si
+        jmp     ct_scan
+ct_cut:
+        mov     byte ptr [si], 0        ; terminate token in place
+        inc     si
+        jmp     ct_skip
+ct_end:
+        mov     byte ptr [si], 0        ; terminate final token (within base page)
+ct_done:
+        mov     word ptr [di], 0        ; argv[argc] = NULL
+        mov     word ptr ds:__argc, bx  ; publish argc to the marker
+        mov     ax, bx                  ; argc -> AX (__watcall)
+        mov     dx, offset DGROUP:_argvtab   ; argv -> DX
         call    main_
         xor     dx, dx
         mov     cl, 0
@@ -46,14 +88,14 @@ BEGDATA ends
 _DATA   segment word public 'DATA'
         public  __argc
 __argc  dw      1                       ; argc marker EXTRN'd by main's object
-__argname db    'IOTEST', 0
+_prog0  db      'UNZIP', 0              ; argv[0]
         public  __argv
-__argv  dw      offset DGROUP:__argname ; argv[0]
-        dw      0                       ; argv[1] = NULL
+__argv  label   word                    ; keep the public symbol some objs EXTRN
+_argvtab dw     33 dup(0)               ; argv[]: 32 slots + NULL terminator
 _DATA   ends
 
 STACK   segment word public 'STACK'
         db      512 dup(0)
 stktop  label   word
 STACK   ends
-        end
+        end     _cstart_
