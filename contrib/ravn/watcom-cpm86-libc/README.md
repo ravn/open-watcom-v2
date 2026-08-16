@@ -304,6 +304,10 @@ Uses the pre-built cross tools + clib source from the scratch OW tree
 (override with `EMU2=`). `wlink` must include the CP/M-86 paragraph-packing
 fix (`f21f6a9f`).
 
+The `wcc`/`wpp`/`wasm`/`wlink` flags used by the build scripts (and why each is
+chosen, plus notable flags deliberately *not* used, e.g. `-1` 80186 codegen) are
+documented in [`docs/WATCOM_FLAGS.md`](docs/WATCOM_FLAGS.md).
+
 ## CPU-safety gate — 80186 (`assert_no_286`)
 
 The RC759 CPU is an **80186**. Our own code is all built `-0` (8086), but the
