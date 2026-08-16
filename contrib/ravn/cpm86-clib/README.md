@@ -38,9 +38,9 @@ the *source + recipe* in git and regenerate the artifacts on demand.
 # once, and after every clean.sh:
 sh contrib/ravn/cpm86-clib/build.sh          # -> lib286/cpm86/{cstartcpm.obj,clibs.lib}
 
-# then, one command per program:
+# then, one command per program (RC759 = 80186, so -march=i186):
 . contrib/ravn/cpm86-clib/env.sh
-owcc -bcpm86 -mcmodel=s prog.c -o PROG.CMD
+owcc -bcpm86 -march=i186 -mcmodel=s prog.c -o PROG.CMD
 ```
 
 `build.sh` ends with a self-test: it links `contrib/ravn/owc-drc/mandel.c` with a

@@ -1,7 +1,7 @@
 # Source this to set up the environment for the owcc -bcpm86 one-command build:
 #     . contrib/ravn/cpm86-clib/env.sh
 # then:
-#     owcc -bcpm86 -mcmodel=s prog.c -o PROG.CMD
+#     owcc -bcpm86 -march=i186 -mcmodel=s prog.c -o PROG.CMD
 #
 # It exposes the native osxa64 tools under the bare names owcc drives them by
 # (wcc/wasm/wlink/wlib), points WATCOM at the tree (so wlink resolves

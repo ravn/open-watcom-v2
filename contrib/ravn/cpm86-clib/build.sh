@@ -16,7 +16,7 @@
 #
 # Once built, a single command links a CP/M-86 .CMD:
 #     WLINK_LNK=$OW/bld/wl/lnk/osxa64/wlink.lnk \
-#     owcc -bcpm86 -mcmodel=s prog.c -o PROG.CMD
+#     owcc -bcpm86 -march=i186 -mcmodel=s prog.c -o PROG.CMD
 # (WLINK_LNK points wlink at the config that defines `system cpm86`; source
 #  env.sh from this directory to set WATCOM/WLINK_LNK/PATH in one step.)
 # ===========================================================================
@@ -45,19 +45,21 @@ WORK="$(mktemp -d)"
 # Include path for building stock Watcom clib source (mirrors the port build).
 INC="-i=$B/lib_misc/h -i=$B/clib/h -i=$B/clib/intel/h -i=$B/watcom/h -i=$B/hdr/dos/h"
 # Compile Watcom clib modules the same way the DOS 16-bit small-model library
-# does: -bt=dos picks the 16-bit host, -ms small model, -0 8086, -zl suppress
-# the auto-lib record inside the members, -x no default includes.
-CLIB="-bt=dos -0 -ms -zl -zastd=c99 -x"
+# does: -bt=dos picks the 16-bit host, -ms small model, -1 80186 (the RC759
+# Piccoline CPU -- unlocks shl/shr r,imm8, imul r,imm, push imm, enter/leave),
+# -zl suppress the auto-lib record inside the members, -x no default includes.
+CLIB="-bt=dos -1 -ms -zl -zastd=c99 -x"
 
 echo "==> startup: cstartcpm.obj"
-wasm -ms -0 "$HERE/cstartcpm.asm" -fo="$WORK/cstartcpm.obj"
+wasm -ms -1 "$HERE/cstartcpm.asm" -fo="$WORK/cstartcpm.obj"
 
 echo "==> clib members"
-# console seam (our CP/M-86 BDOS putchar)
-owcc -bcpm86 -mcmodel=s -O2 -c "$HERE/putchar.c" -o "$WORK/putchar.obj"
-# 32-bit long multiply / divide helpers (stock Watcom cgsupp)
-wasm -ms -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/i4m.asm" -fo="$WORK/i4m.obj"
-wasm -ms -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/i4d.asm" -fo="$WORK/i4d.obj"
+# console seam (our CP/M-86 BDOS putchar); -march=i186 targets the RC759 CPU
+owcc -bcpm86 -march=i186 -mcmodel=s -O2 -c "$HERE/putchar.c" -o "$WORK/putchar.obj"
+# 32-bit long multiply / divide helpers (stock Watcom cgsupp; 8086 mnemonics
+# only, so -1 just keeps the assembler CPU level uniform with the rest)
+wasm -ms -1 -i="$B/watcom/h" "$B/clib/cgsupp/a/i4m.asm" -fo="$WORK/i4m.obj"
+wasm -ms -1 -i="$B/watcom/h" "$B/clib/cgsupp/a/i4d.asm" -fo="$WORK/i4d.obj"
 # a genuine stock Watcom clib module, to prove auto-fetch of real clib code
 wcc $CLIB $INC "$B/clib/string/c/strlen.c" -fo="$WORK/strlen.obj"
 
@@ -79,8 +81,10 @@ DRC="$OW/contrib/ravn/owc-drc/MANDEL-DRC.CMD"     # independent DR C oracle
 if [ -f "$MSRC" ]; then
     T="$(mktemp -d)"
     echo "==> self-test: owcc -bcpm86 mandel.c -o MANDEL.CMD  (single command)"
-    # mandel.c hits wcc ICE 97 at -O1+ on its ternary/string-index line, so -O0.
-    ( cd "$T" && owcc -bcpm86 -mcmodel=s -O0 "$MSRC" -o MANDEL.CMD )
+    # RC759 target: -march=i186 (80186).  The former wcc ICE 97 at -O1+ on
+    # mandel.c's ternary/string-index line was a stale incremental binary, not a
+    # stock bug -- gone after a clean rebuild (2026-08-16) -- so this builds -O2.
+    ( cd "$T" && owcc -bcpm86 -march=i186 -mcmodel=s -O2 "$MSRC" -o MANDEL.CMD )
     ls -l "$T/MANDEL.CMD"
     if [ -x "$EMU2" ] && [ -f "$DRC" ]; then
         ( cd "$T" && EMU2_DRIVE_A=. EMU2_DEFAULT_DRIVE=A "$EMU2" MANDEL.CMD 2>/dev/null | tr -d '\r' >ours.txt
