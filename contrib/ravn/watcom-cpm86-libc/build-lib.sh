@@ -158,6 +158,7 @@ echo "==> Layer 2: CP/M-86 seam (BDOS) + closure stubs + port seams"
 "$WCC" $USER $INC "$SRC/port/abortcpm.c" -fo=abortcpm.obj
 "$WCC" $USER $INC "$SRC/port/portmisc.c" -fo=portmisc.obj    # setmode/signal/environ
 "$WCC" $USER $INC "$SRC/port/gtctmcpm.c" -fo=gtctmcpm.obj    # __getctime() BDOS T_GET seam
+"$WCC" $USER $INC "$SRC/port/dirent.c"   -fo=dirent.obj      # opendir/readdir BDOS F_SFIRST/F_SNEXT
 # diskio.c owns the real __lseek/tolower/etc.; drop those overlapping stubs.
 "$WCC" $USER $INC -DDISKIO_LSEEK "$SRC/port/stubs.c" -fo=stubs.obj
 
@@ -185,7 +186,7 @@ rm -f clibcpm.lib
     +memcpy.obj +memset.obj +memmove.obj +memcmp.obj +gmtime.obj \
     +i4m.obj +i4d.obj \
     +cominit.obj +diskio.obj +lowlevel.obj +errnoptr.obj +abortcpm.obj \
-    +portmisc.obj +gtctmcpm.obj +stubs.obj \
+    +portmisc.obj +gtctmcpm.obj +dirent.obj +stubs.obj \
     +localtim.obj +mktime.obj +locmktim.obj +timeutil.obj +leapyear.obj \
     +tzset.obj +time.obj
 
