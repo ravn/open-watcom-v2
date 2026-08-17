@@ -22,6 +22,12 @@
 
 #include <stddef.h>
 
+/* Forward prototypes for this seam's own entry points (clib -we: no implicit
+   function declarations). */
+void  wc_heap_init( void );
+void *__brk( unsigned brk_value );
+void *sbrk( int increment );
+
 /* _curbrk -- current top of the near heap, a DGROUP (near) offset. Normally
    defined in Watcom's crwd086.asm RT-data block; we define it here instead so
    the linker does NOT pull crwd086 (which also drags _psp / _LpCmdLine /

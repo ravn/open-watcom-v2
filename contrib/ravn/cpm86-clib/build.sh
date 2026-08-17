@@ -1,5 +1,13 @@
 #!/bin/bash
 # ===========================================================================
+# DEPRECATED (2026-08): superseded by
+#   contrib/ravn/watcom-cpm86-libc/build-lib.sh
+# which builds the FULL CP/M-86 C library (183 modules incl. stdio, malloc,
+# string, and a real time()/__getctime seam) and installs it as the canonical
+# lib286/cpm86/{clibs.lib,cstartcpm.obj}. This script only ever produced a
+# 4-module proof-of-concept stub (putchar, i4m, i4d, strlen) and is kept for
+# reference/history only. Use build-lib.sh instead.
+# ===========================================================================
 # build.sh -- regenerate the CP/M-86 C-runtime artifacts that the Open Watcom
 # "owcc -bcpm86" one-command build depends on, entirely FROM SOURCE IN GIT.
 #

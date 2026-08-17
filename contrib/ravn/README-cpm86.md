@@ -1,22 +1,52 @@
 # Building CP/M-86 programs with Open Watcom
 
-## Short answer
+> **STATUS (this fork): CP/M-86 IS a supported, native target.** This fork of
+> Open Watcom carries patches that add a **native `format cpm86` output format
+> to the linker** (`wl`), and a hand-built CP/M-86 C-runtime seam layer lives in
+> `watcom-cpm86-libc/`. Do **not** assume CP/M-86 is unsupported — it is built
+> and passes tests. The historical "workaround" sections below (raw binary +
+> `bin2cmd.py`) are the *older* freestanding-no-runtime route, kept because it is
+> still handy for tiny programs; the native linker format is the primary path.
 
-Open Watcom **cannot** build CP/M-86 executables out of the box. It has:
+## Short answer — native `format cpm86` (patched into this fork)
 
-- no `.CMD` output format in the linker (`wl` supports DOS `.EXE`/`.COM`,
-  OS/2, Windows, ELF, Phar Lap, QNX, RDOS, Novell and raw binary only — see
-  `bld/wl/h/_formats.h`), and
-- no CP/M-86 C runtime (`clib` targets DOS/OS2/Windows/etc. via INT 21h).
+`wl` in this tree emits CP/M-86 `.CMD` files directly. Link with:
 
-There is **no** `__CPM__` target macro or CP/M header/library anywhere in the
-tree. The only `CPM`/`CP/M` strings in the source are unrelated (DOS PSP
-compatibility fields, an SCSI bitflag, a comment about the CP/M-era EOF byte).
+```
+wcc  -bt=dos -0 -ms -zl -zastd=c99 hello.c -fo=hello.obj
+wl   format cpm86 op dosseg op quiet name HELLO.CMD file hello.obj  [more files/libraries]
+```
 
-## But it is achievable via a workaround
+Sub-formats: `format cpm86 small` (separate code/data groups, pair with `-ms`)
+and `format cpm86 8080` (single group, `.COM`-like). A `library cpm86 …`
+(`LIBCPM86`) directive is also recognised.
 
-CP/M-86 and DOS both run 8086 code, so you can compile with Open Watcom and
-retarget the *output packaging* and *system-call layer*:
+**Proof it is native, not a wrapper** (cite these, do not re-derive):
+
+- `bld/wl/h/_formats.h` — `pick_format( 0x00200000, MK_CPM86, 21, "CP/M-86", "CP/M-86" )`.
+- `bld/wl/c/cmdcpm86.c` / `bld/wl/h/cmdcpm86.h` — the `CPM86` format command,
+  its `SMall`/`8080` sub-formats and `SetCPM86Fmt`/`FreeCPM86Fmt`, gated on `_CPM86`.
+- `bld/wl/c/loadcpm86.c` / `bld/wl/h/loadcpm86.h` — the actual `.CMD` image
+  writer (`WriteCPM86Data`, group-descriptor header).
+- `bld/wl/c/cmdline.c` wires `MK_CPM86` + `"LIBCPM86"`; `bld/wl/c/cmdall.c`
+  registers the `"CPM86"` format keyword.
+- Built objects present: `bld/wl/osxa64/loadcpm86.obj`, `…/cmdcpm86.obj`. The
+  four benchmark `.CMD`s in the comparison harness and every `.cmd` under
+  `watcom-cpm86-libc/build-*/` were produced by this native `format cpm86` and
+  run correctly under `cpm86run_unicorn.py`.
+
+The remaining task for a *standard* C program is the CP/M-86 **C runtime**
+(there is no `__CPM__`-targeted `clib` build): that seam layer — a CP/M-86
+`crt0`, a BDOS-based stdio/`printf`, an arena heap and small stubs — is provided
+in `watcom-cpm86-libc/port/` and linked alongside Watcom's own (unchanged) clib
+objects. See `watcom-cpm86-libc/README.md`.
+
+## Alternative: freestanding via raw binary + `bin2cmd.py` (older route)
+
+Before the native `format cpm86` patch, CP/M-86 `.CMD`s were produced by
+emitting a flat `format raw` image and wrapping it in a 128-byte `.CMD` header
+with `bin2cmd.py`. This still works and is the simplest route for a tiny
+freestanding program that makes its own BDOS calls and needs no C runtime:
 
 ```
 wcc  -0 -mt -s -oi hello.c            # 16-bit x86, tiny model, no runtime
@@ -128,10 +158,11 @@ released `wasm`/`wcc`/`wl` if present, else falls back to `bwasm`/`bwcc`/
 
 ## What is still required
 
-1. **A CP/M-86 runtime** if you want the standard C library (stdio, malloc,
-   `printf`). That means a CP/M-86 startup stub (`_cstart_`) plus a BDOS-based
-   shim replacing clib's INT 21h calls. Freestanding code (own BDOS calls, as
-   in `hello.c`) needs none of this and is the right first milestone.
+1. **A CP/M-86 C runtime** for the standard C library (stdio, malloc,
+   `printf`). This **now exists** in `watcom-cpm86-libc/` — a CP/M-86 startup
+   stub plus a BDOS-based shim replacing clib's INT 21h calls — and is what the
+   compiler-quality benchmarks link against. Freestanding code (own BDOS calls,
+   as in `hello.c`) needs none of this.
 2. **Validation on real CP/M-86.** The `.CMD` runs under the included
    instruction-level emulators (see below); a full-machine emulator (86Box,
    PCem, or a CP/M-86 VM) is still the way to validate OS-loader specifics.

@@ -37,6 +37,13 @@
 #include <utime.h>          /* struct utimbuf (utime) */
 #include "qread.h"
 #include "qwrite.h"
+#include <stdlib.h>         /* exit() prototype (clib -we: no implicit decls) */
+
+/* Forward prototypes for this seam's own public entry points (clib -we forbids
+   defining a non-static function with no prior declaration). */
+int  os_reports_lrbc( void );
+long _WCNEAR __lseek( int handle, long offset, int origin );
+int  _WCNEAR __close( int handle );
 
 /* ---- CP/M-86 BDOS gateway ------------------------------------------------ */
 /* INT 0E0h: function in CL, parameter (near offset, or a segment for fn 51) in
@@ -45,22 +52,22 @@
 extern unsigned char _bdos( unsigned char fn, unsigned param );
 #pragma aux _bdos =             \
     "int 0E0h"                  \
-    parm [cl] [dx]              \
-    value [al]                  \
-    modify [ax bx cx dx es];
+    __parm [__cl] [__dx]              \
+    __value [__al]                  \
+    __modify [__ax __bx __cx __dx __es];
 
 extern unsigned _getds( void );
 #pragma aux _getds =            \
     "mov ax,ds"                 \
-    value [ax]                  \
-    modify [ax];
+    __value [__ax]                  \
+    __modify [__ax];
 
 extern void _bdos_conout( int c );      /* BDOS C_WRITE (fn 2, char in DL) */
 #pragma aux _bdos_conout =      \
     "mov cl,2"                  \
     "int 0E0h"                  \
-    parm [dx]                   \
-    modify [ax bx cx es];
+    __parm [__dx]                   \
+    __modify [__ax __bx __cx __es];
 
 /* BDOS function numbers we use. */
 #define BD_VERSION  12          /* S_BDOSVER: OS/BDOS version (runtime capability) */
@@ -935,7 +942,7 @@ _WCRTLINK void exit( int status )
 
 /* ---- Low-level POSIX I/O + rename: the handleio-layer seam ----------------
  *
- * Watcom's own handleio open/creat/read/write/close (bld/clib/handleio/c/*.c)
+ * Watcom's own handleio open/creat/read/write/close (bld/clib/handleio/c/ files)
  * all bottom into DOS INT 21h via __getOSHandle -- forbidden on this target --
  * so THIS file is the CP/M-86 replacement for that whole layer. These thin
  * POSIX entry points let a program (and Watcom's UNCHANGED clibtest

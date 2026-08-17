@@ -1,0 +1,51 @@
+# CP/M-86 small-model clib merge component list.
+#
+# Same OS-agnostic component set as library/msdos.086/libs.mif, but:
+#   - the OS layer `_dos` (INT 21h) is replaced by `_cpm` (BDOS INT 0E0h);
+#   - the DOS `startup` component is dropped (cpm86 supplies its own startup,
+#     _cpm/.../cstartcpm.obj, linked by wlink's `system cpm86` block).
+# `_cpm` is listed FIRST so its diskio.obj owns the fd-layer symbols
+# (__qwrite/__qread/__lseek/__close/_sopen/isatty/...) in the merged archive
+# dictionary; the DOS-coupled handleio objects (qwrit.obj/__lseek.obj, which
+# reference the INT 21h __set_errno_dos) are thereby shadowed and never linked,
+# while the OS-agnostic handleio objects (e.g. textmode.obj -> _fmode) still
+# resolve on demand.
+# The agnostic components are OS-independent by construction, so cpm86 reuses
+# the standard-built msdos.086 component libraries rather than rebuilding
+# byte-identical objects; only `_cpm` is compiled for system=cpm86.
+
+pfx__ =../../../
+agn__ =/library/msdos.086/$(libsubdir)/$(libname).lib
+cpm__ =/library/cpm86.086/$(libsubdir)/$(libname).lib
+
+libs = $+ &
+    $(pfx__)_cpm$(cpm__) &
+    $(pfx__)alias$(agn__) &
+    $(pfx__)bios$(agn__) &
+    $(pfx__)cgsupp$(agn__) &
+    $(pfx__)char$(agn__) &
+    $(pfx__)conio$(agn__) &
+    $(pfx__)convert$(agn__) &
+    $(pfx__)direct$(agn__) &
+    $(pfx__)environ$(agn__) &
+    $(pfx__)file$(agn__) &
+    $(pfx__)fpu$(agn__) &
+    $(pfx__)handleio$(agn__) &
+    $(pfx__)heap$(agn__) &
+    $(pfx__)intel$(agn__) &
+    $(pfx__)kanji$(agn__) &
+    $(pfx__)math$(agn__) &
+    $(pfx__)mbyte$(agn__) &
+    $(pfx__)memory$(agn__) &
+    $(pfx__)misc$(agn__) &
+    $(pfx__)posix$(agn__) &
+    $(pfx__)process$(agn__) &
+    $(pfx__)search$(agn__) &
+    $(pfx__)streamio$(agn__) &
+    $(pfx__)string$(agn__) &
+    $(pfx__)time$(agn__) &
+    $-
+
+pfx__ =
+agn__ =
+cpm__ =

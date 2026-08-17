@@ -2,9 +2,12 @@
 # ---------------------------------------------------------------------------
 # build-cpm86.sh - build a freestanding CP/M-86 .CMD program with Open Watcom
 #
-# Open Watcom cannot emit CP/M-86 .CMD files natively (its linker only knows
-# DOS .EXE/.COM, OS/2, Windows, ELF, Phar Lap, QNX, RDOS and raw binary -- see
-# bld/wl/h/_formats.h). We therefore:
+# NOTE: this fork's linker CAN emit CP/M-86 natively (wl "format cpm86", added
+# via loadcpm86.c/cmdcpm86.c -- see README-cpm86.md and watcom-cpm86-libc/).
+# This script is the OLDER freestanding-no-runtime route kept for tiny programs:
+# it links a flat raw binary and wraps it in a .CMD header, so it needs no C
+# runtime. For standard C (printf/malloc) use "format cpm86" + the
+# watcom-cpm86-libc port instead. This raw route:
 #
 #   1. assemble/compile 16-bit x86 (no runtime)
 #   2. link to a flat raw binary with wl (format raw)
