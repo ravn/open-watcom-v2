@@ -92,6 +92,7 @@ cw streamio/c/printf.c   printf.obj
 cw streamio/c/fprintf.c  fprintf.obj
 cw streamio/c/fprtf.c    fprtf.obj
 cw streamio/c/fputc.c    fputc.obj
+cw streamio/c/putchar.c  putchar.obj    # putchar -> fputc(c,stdout); fputc already in archive
 cw streamio/c/fputs.c    fputs.obj
 cw streamio/c/puts.c     puts.obj
 cw streamio/c/fwrite.c   fwrite.obj
@@ -104,7 +105,9 @@ cw streamio/c/fopen.c    fopen.obj
 cw streamio/c/fclose.c   fclose.obj
 cw streamio/c/allocfp.c  allocfp.obj
 cw streamio/c/fgetc.c    fgetc.obj
+cw streamio/c/getchar.c  getchar.obj    # getchar -> fgetc(stdin); fgetc already in archive
 cw streamio/c/fgets.c    fgets.obj
+cw streamio/c/gets.c     gets.obj       # gets -> fgets over stdin; read path already present
 cw streamio/c/fread.c    fread.obj
 cw streamio/c/fseek.c    fseek.obj
 cw streamio/c/ftell.c    ftell.obj
@@ -185,6 +188,7 @@ rm -f clibcpm.lib
     +atoi.obj +strtol.obj +strtok.obj +setbits.obj +bits.obj +toupper.obj +setvbuf.obj \
     +prtf.obj +noefgfmt.obj \
     +printf.obj +fprintf.obj +fprtf.obj +fputc.obj +fputs.obj +puts.obj \
+    +putchar.obj +getchar.obj +gets.obj \
     +fwrite.obj +flush.obj +fflush.obj +perror.obj \
     +fopen.obj +fclose.obj +allocfp.obj +fgetc.obj +fgets.obj +fread.obj \
     +fseek.obj +ftell.obj +rewind.obj +feof.obj +ferror.obj +ungetc.obj \
