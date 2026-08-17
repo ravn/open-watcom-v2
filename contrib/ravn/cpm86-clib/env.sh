@@ -6,12 +6,15 @@
 # It exposes the native osxa64 tools under the bare names owcc drives them by
 # (wcc/wasm/wlink/wlib), points WATCOM at the tree (so wlink resolves
 # %WATCOM%/lib286/cpm86) and WLINK_LNK at the config that defines `system
-# cpm86` (without it wlink reports "undefined system name: cpm86").
+# cpm86` (without it wlink reports "undefined system name: cpm86"). These are
+# the standard "setvars" bits every Watcom target needs in an UNINSTALLED tree
+# (INCLUDE, tool PATH, WLINK_LNK) — none are cpm86-specific.
 #
-# NOTE: run contrib/ravn/watcom-cpm86-libc/build-lib.sh once (and after every
-# clean) to build the FULL clib and install it as the canonical
-# lib286/cpm86/{cstartcpm.obj,clibs.lib}. (The old 4-module cpm86-clib/build.sh
-# stub is superseded.)
+# NOTE: the CP/M-86 C runtime lib286/cpm86/{clibs.lib,cstartcpm.obj} is now a
+# FIRST-CLASS standard-build target (bld/clib/_cpm + bld/clib/library/cpm86.086;
+# builder.ctl installs it). Build it with the standard driver, e.g. from
+# bld/clib:  `pmake -d cpm86`  (component _cpm then the merge). The old
+# contrib build-lib.sh / build.sh scripts are NO LONGER required.
 _OW="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../../.." && pwd)"
 _B="$_OW/bld"
 _BIN="${TMPDIR:-/tmp}/owcc-cpm86-bin"
