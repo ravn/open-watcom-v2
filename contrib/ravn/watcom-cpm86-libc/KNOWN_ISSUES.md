@@ -83,18 +83,30 @@ Watcom ships its own self-checking regression tests
 `file/c/filetest.c`). Running them unchanged — the way `build-owtests.sh` runs
 `float01–04` — is the independent gold-standard disk oracle.
 
-**`streamio/c/iotest.c` now PASSES unchanged** under emu2, purity INT21h=0
-(`build-streamio.sh` -> "Tests completed (iotest)."). It exercises
-`fopen("CON")`, `freopen` onto std streams and onto CON, `fcloseall`/`flushall`,
-`dup(fileno(stdout))`, `fdopen`, `setbuf`/`setvbuf`, `ungetc`, `perror`, the
-`scanf`/`vscanf`/`vfprintf`/`vprintf` family, `tmpfile` (NUM_FILES=10 at once),
-byte-exact past-EOF `fgetc`, C append semantics, and cross-handle read-after-
-`fflush`. Seam work that made it pass: `fopen("CON")` console device; per-handle
-iomode registration (gated by `-DDISKIO_IOMODE`); `dup`/`exit` seams; crt0
-`argc`/`argv`; `tmpfile` slot count raised to 16; byte-exact EOF via `fp->len`
-for a written handle plus on-demand disk-length re-derivation for a pure reader;
-and an emu2 fidelity fix (flush host handle after a random write so a second FCB
-/ `stat()` sees it, matching real CP/M-86 write-through).
+**`streamio/c/iotest.c` now PASSES unchanged** under emu2 AND real MAME rc759,
+purity INT21h=0 (`build-streamio.sh` -> "Tests completed (unzip)."). It
+exercises `fopen("CON")`, `freopen` onto std streams and onto CON,
+`fcloseall`/`flushall`, `dup(fileno(stdout))`, `fdopen`, `setbuf`/`setvbuf`,
+`ungetc`, `perror`, the `scanf`/`vscanf`/`vfprintf`/`vprintf` family, `tmpfile`
+(NUM_FILES=10 at once), byte-exact past-EOF `fgetc`, C append semantics, and
+cross-handle read-after-`fflush`. Seam work that made it pass: `fopen("CON")`
+console device; per-handle iomode registration (gated by `-DDISKIO_IOMODE`);
+`dup`/`exit` seams; crt0 `argc`/`argv`; `tmpfile` slot count raised to 16;
+byte-exact EOF via `fp->len` for a written handle; and, for the
+cross-handle-read-after-`fflush` case specifically (`Test_Flushes`, the "one
+'w' + one 'r' handle open simultaneously on the same file" pattern) --
+**FIXED 2026-08-18** (`3f815e6c53`): a pure reader's own `BD_READRAND` is
+unreliable once a still-open writer on the same file has written past what
+CP/M's directory (synced only at `F_CLOSE`) reflects -- it can report
+"unwritten" OR, worse, SUCCEED but return STALE data, silently clobbering the
+correct copy already sitting in the shared `dma[]` cache from the writer's own
+write. `load_record()` now routes a pure reader entirely through the writer's
+FCB/cache in this case, never falling back to the reader's own FCB while an
+open writer exists on the same file. (An earlier version of this note claimed
+this already worked via "on-demand disk-length re-derivation for a pure
+reader" alone -- that re-derives the correct LENGTH but does not by itself fix
+the DATA read path, which is what the fix above addresses; the earlier claim
+was stale/incomplete, not something that regressed.)
 
 Still blocked (other clibtest members) on missing seam primitives:
 
