@@ -31,7 +31,7 @@
 
 extern int cprintf( const char *, ... );
 
-#define NALLOC  130
+#define NALLOC  40
 
 static unsigned lcg_seed = 12345u;
 

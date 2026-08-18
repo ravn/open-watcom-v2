@@ -23,11 +23,15 @@ WASM="${OWASM_BIN:-$B/wasm/osxa64/wasm.exe}"
 WLINK="${OWLINK_BIN:-$B/wl/osxa64/wlink.exe}"
 EMU2="${EMU2:-/Users/ravn/z80/scratch/cpm86-tools/emu2-cpm86/emu2}"
 
-# FARHEAP size: ~300 KB (0x4B800 = 301568 bytes), deliberately NOT a
-# multiple of 0x10000 (64K) -- exercises four full 64K slabs plus one
-# partial (0x4B800 = 0x10000*4 + 0xB800), i.e. the multi-slab carving path
-# in farheap.c well past a single slab.
-FARHEAP_SIZE=0x4B800
+# FARHEAP size: modest 96 KB (0x18000), still one full 64K slab + one
+# partial (0x18000 = 0x10000 + 0x8000) so multi-slab carving is exercised,
+# but small enough to actually fit in Concurrent CP/M-86's real free-memory
+# budget on real RC759 hardware (384K total RAM minus BDOS/XIOS/console
+# overhead) -- a 300 KB request was rejected outright by Concurrent CP/M-86
+# itself ("Concurrent Fejl: For lidt lager" = too little memory) when tried
+# under MAME 2026-08-18, a real memory-budget constraint distinct from the
+# emu2 oracle (which has no such check and happily ran the 300 KB version).
+FARHEAP_SIZE=0x18000
 
 OUTDIR="${OUTDIR:-build-farheap}"; mkdir -p "$OUTDIR"; cd "$OUTDIR"
 SRC=".."
