@@ -14,12 +14,24 @@
 set -e
 cd "$(dirname "$0")"
 OW="${OW:-$(cd "$(dirname "$0")/../../.." && pwd)}"; B="$OW/bld"
-WCC="$B/cc/i86/osxa64/binbuild/wcc.exe"
-WASM="$B/wasm/osxa64/wasm.exe"
-WLINK="$B/wl/osxa64/wlink.exe"
-WLIB="$B/nwlib/osxa64/wlib.exe"
-WDIS="$B/ndisasm/osxa64/wdis.exe"
-EMU2="${EMU2:-/Users/ravn/z80/scratch/cpm86-tools/emu2-cpm86/emu2}"
+# Host platform build-dir token -- same detection as contrib/ravn/cpm86-clib/env.sh.
+# NOTE: this test needs disk I/O, which cpm86run_unicorn.py's BDOS layer does
+# NOT implement (console-only) -- emu2 is required here, not a RUNNER switch.
+_uS="$(uname -s)"; _uM="$(uname -m)"
+case "$_uS/$_uM" in
+    Darwin/arm64)              PLAT=osxa64 ;;
+    Darwin/x86_64)             PLAT=osxx64 ;;
+    Linux/x86_64)              PLAT=linuxx64 ;;
+    Linux/aarch64|Linux/arm64) PLAT=linuxa64 ;;
+    Linux/i?86)                PLAT=linux386 ;;
+    *) echo "build-streamio.sh: unrecognised host $_uS/$_uM" >&2; exit 1 ;;
+esac
+WCC="$B/cc/i86/$PLAT/binbuild/wcc.exe"
+WASM="$B/wasm/$PLAT/wasm.exe"
+WLINK="$B/wl/$PLAT/wlink.exe"
+WLIB="$B/nwlib/$PLAT/wlib.exe"
+WDIS="$B/ndisasm/$PLAT/wdis.exe"
+EMU2="${EMU2:-/home/ravn/z80/emu2-cpm86/emu2}"
 OUTDIR="${OUTDIR:-build-streamio}"; mkdir -p "$OUTDIR"; cd "$OUTDIR"
 SRC=".."
 TESTSRC="$B/clibtest/streamio/c/iotest.c"     # Watcom's UNCHANGED stream test

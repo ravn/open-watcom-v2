@@ -139,6 +139,31 @@ static dfile_t *fd_to_file( int handle )
     return( &dfiles[i] );
 }
 
+/* Find another OPEN handle on the SAME file that has WRITTEN (fp->wrote), if
+   any. CP/M's directory entry (what BD_FILESIZE / disk_len() reads) is only
+   synced at F_CLOSE -- a WRITE RANDOM on a still-open FCB updates that FCB's
+   OWN view and the actual data blocks, but NOT the on-disk directory, so a
+   DIFFERENT FCB's F_SIZE cannot see the growth until the writer closes. This
+   is a real CP/M limitation (not a bug we can fix via more BDOS calls), so we
+   route around it with our own in-RAM bookkeeping: any other still-open
+   writer's dfile_t already tracks the byte-exact length itself (fp->len is
+   authoritative for a handle that has written, see __qwrite). This is what
+   lets a pure-reader handle see a byte another handle just fflush()ed
+   (iotest.c "flushes": one "w" + one "r" handle open simultaneously on the
+   same file) without waiting for a close/reopen. */
+static dfile_t *find_open_writer( const dfile_t *fp )
+{
+    int i;
+    for( i = 0; i < DISK_MAX; i++ ) {
+        dfile_t *o = &dfiles[i];
+        if( o == fp || !o->used || o->is_con || !o->wrote )
+            continue;
+        if( memcmp( &o->fcb[FCB_DRIVE], &fp->fcb[FCB_DRIVE], 1 + 11 ) == 0 )
+            return( o );
+    }
+    return( NULL );
+}
+
 /* ---- FCB helpers --------------------------------------------------------- */
 
 /* Point the BDOS DMA at our work buffer (offset AND segment, so we do not rely
@@ -242,9 +267,52 @@ static int load_record( dfile_t *fp, long rec )
 
     if( cache_fp == fp && cache_rec == rec )
         return( 0 );
+
+    if( !fp->wrote ) {
+        /* A PURE READER must never trust its OWN FCB for a record another
+           still-open handle on the SAME file may have just written. CP/M's
+           directory (what the reader's FCB resolves extents through) is only
+           synced at F_CLOSE, so the reader's own BD_READRAND is unreliable
+           here: it can either report "unwritten" OR -- worse -- succeed but
+           return STALE data (whatever the directory reflected as of some
+           earlier sync point, not the writer's latest byte), silently
+           clobbering the correct copy we already have in dma[] from the
+           writer's own write. Route entirely around the reader's FCB in this
+           case: reuse the writer's cached record if it's already sitting in
+           dma[] (no BDOS call at all -- the common case right after a
+           fflush()), else re-read explicitly through the WRITER's own FCB
+           (whose extent view IS current). (iotest.c "flushes": a "w"+"r"
+           handle pair open simultaneously on the same file.) */
+        dfile_t *w = find_open_writer( fp );
+        if( w != NULL ) {
+            if( cache_fp == w && cache_rec == rec )
+                return( 0 );                     /* already fresh in dma[] */
+            fcb_set_record( w->fcb, rec );
+            set_dma();
+            rc = _bdos( BD_READRAND, (unsigned)(size_t)w->fcb );
+            if( rc == 1 || rc == 4 ) {
+                memset( dma, CPM_EOF, SECT );
+                cache_fp = NULL;
+                return( 1 );
+            }
+            if( rc != 0 ) {
+                cache_fp = NULL;
+                return( -1 );
+            }
+            cache_fp = w;                        /* tag as the WRITER's record,
+                                                       so a later hit (by this or
+                                                       another reader) short-
+                                                       circuits via the check
+                                                       above instead of retrying
+                                                       BDOS */
+            cache_rec = rec;
+            return( 0 );
+        }
+    }
+
     fcb_set_record( fp->fcb, rec );
     set_dma();
-    rc = _bdos( BD_READRAND, (unsigned)(size_t)&fp->fcb[0] );
+    rc = _bdos( BD_READRAND, (unsigned)(size_t)fp->fcb );
     if( rc == 1 || rc == 4 ) {          /* 1 = reading unwritten data, 4 = past EOF */
         memset( dma, CPM_EOF, SECT );
         cache_fp = NULL;
@@ -523,7 +591,17 @@ int _WCNEAR __qread( int handle, void *buffer, unsigned len )
            (one "w" handle + one "r" handle on the same file). */
         if( fp->pos >= fp->len ) {
             if( !fp->wrote ) {
-                long dl = disk_len( fp );           /* re-read length off disk */
+                dfile_t *w = find_open_writer( fp );
+                long dl;
+                if( w != NULL )
+                    /* An open (not yet closed) writer on this file has the
+                       authoritative length in RAM -- CP/M's directory entry
+                       (what disk_len()/BD_FILESIZE reads) is stale until that
+                       writer closes, so a disk re-read here would still see
+                       the pre-write size and wrongly report EOF. */
+                    dl = w->len;
+                else
+                    dl = disk_len( fp );            /* re-read length off disk */
                 if( dl > fp->len )
                     fp->len = dl;
             }
