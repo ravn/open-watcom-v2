@@ -8,6 +8,45 @@
 > `bin2cmd.py`) are the *older* freestanding-no-runtime route, kept because it is
 > still handy for tiny programs; the native linker format is the primary path.
 
+## CP/M-86 vs MS-DOS — same 8086 core, different runtime + exe format
+
+For the compiler, **CP/M-86 codegen *is* MS-DOS 8086 codegen** — same 8086
+real-mode instruction set, same OMF `.obj` format, same memory models
+(tiny/small/compact/large ↔ 8080/Small/Compact/Big group models), same
+calling conventions. CP/M-86 sources are compiled `wcc -bt=dos`; the
+compiler never needs to know the target. Only **two** things differ, and
+both are link/runtime concerns, not codegen:
+
+1. **Runtime / OS-call mechanism.** MS-DOS enters the OS with `INT 21h`
+   (function in `AH`); CP/M-86 uses reserved software `INT 224` (`0E0h`)
+   into the BDOS (function in `CL`; 8086 `CH:CL` mirror CP/M-80 `B:C`). The
+   C-runtime seam that bridges Watcom's DOS clib onto BDOS lives in
+   `watcom-cpm86-libc/port/` and `bld/clib/_cpm/`. Ref: *CP/M-86 System
+   Guide* §4.1 (the txt's OCR "#244" is a typo for the assembler's
+   `equ 224 ;reserved BDOS Interrupt`).
+2. **Executable format.** MS-DOS uses flat `.COM` (≤64K) or relocatable MZ
+   `.EXE`; CP/M-86 uses `.CMD` — a 128-byte header of up to 8 nine-byte
+   **group descriptors** (code/data/extra/stack + 4 aux; each a paragraph
+   length + optional absolute base) that the CCP/loader uses to place the
+   groups and set CS/DS/SS/ES. Ref: *CP/M-86 System Guide* §3 (GENCMD/CMD
+   header) & §4 (memory models). Realized here by native
+   `wlink format cpm86` (see below), not a wrapper.
+
+**Distinguishing the two in source — `__CPM86__`.** Verified empirically:
+`-bt=dos` predefines `__DOS__`/`_DOS`/`MSDOS`; `-bt=cpm86` predefines
+`__CPM86__` (auto `__<TARGET>__` from `SetFinalTargetSystem`). Use
+`#ifdef __CPM86__` to select CP/M-86 code paths. **Note:** the production
+wrapper `owcc -bcpm86` currently compiles `-bt=dos` (`flags.mif`
+`sw_c_cpm86 = -bt=dos`), so `__CPM86__` is *not* defined in that shipping
+build — pass `-bt=cpm86` (or `-D__CPM86__`) when you need to distinguish,
+until `-bt=cpm86` is made first-class (inherit `TS_DOS` codegen + predefine
+both the DOS-family macros *and* `__CPM86__`).
+
+Primary references are the manuals in this directory
+(`CPM-86_System_Guide_Jun83`, `CPM-86_Programmers_Guide_Jan83`,
+`Concurrent_CPM_Programmers_Reference_Guide_Jan84`). See also the
+superproject memo `tasks/memory/reference_cpm86_vs_msdos_model.md`.
+
 ## Short answer — native `format cpm86` (patched into this fork)
 
 `wl` in this tree emits CP/M-86 `.CMD` files directly. Link with:
