@@ -39,6 +39,8 @@
 
 #ifdef _CPM86
 
+offset  CPM86FarHeapSize = 0;
+
 void SetCPM86Fmt( void )
 /***********************
  * nothing format-specific to initialise for phase 1 (small / 8080 model,
@@ -88,6 +90,31 @@ bool ProcCPM86Format( void )
     ProcOne( CPM86SubFormats, SEP_NO );
     FmtData.def_ext = E_CMD;
     return( true );
+}
+
+/****************************************************************
+ * "OPTION FARheap=<size>" -- Stage A compact model
+ ****************************************************************/
+
+bool ProcCPM86FarHeap( void )
+/****************************
+ * process FARHEAP option: requests an Extra (G-Type 3) group descriptor
+ * of <size> bytes, rounded up to a paragraph.  Real LINK-86 precedent is
+ * `EXTRA[MAXIMUM[hex-paragraphs]]` (see reference_cpm86_big_model.md);
+ * this is the wlink equivalent, byte- rather than paragraph-sized to match
+ * every other wlink size option (e.g. STACK).  0 (the default, i.e. this
+ * option never given) keeps output identical to phase 1: no Extra group,
+ * pure small model.
+ */
+{
+    unsigned_32     value;
+    bool            ret;
+
+    ret = GetLong( &value );
+    if( ret ) {
+        CPM86FarHeapSize = value;
+    }
+    return( ret );
 }
 
 #endif

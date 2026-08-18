@@ -2003,6 +2003,9 @@ static parse_entry  MainOptions[] = {
     "NORelocs",     ProcNoRelocs,       (MK_QNX | MK_DOS16M  | MK_PE | MK_ELF), 0,
 #endif
     "HSHIFT",       ProcHshift,         (MK_DOS | MK_ALLOW_16),  0,
+#ifdef _CPM86
+    "FARheap",      ProcCPM86FarHeap,   MK_CPM86, 0,
+#endif
     NULL
 };
 

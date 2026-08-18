@@ -51,6 +51,7 @@
 #include "loadfile.h"
 #include "dbgall.h"
 #include "loadcpm86.h"
+#include "cmdcpm86.h"
 
 
 #ifdef _CPM86
@@ -62,6 +63,7 @@
 
 #define CMD_TYPE_CODE   1
 #define CMD_TYPE_DATA   2
+#define CMD_TYPE_EXTRA  3
 
 /* number of 16-byte paragraphs needed to hold size bytes */
 #define CMD_PARAS(size) ((unsigned_16)( __ROUND_UP_SIZE_PARA( size ) >> 4 ))
@@ -117,6 +119,28 @@ void FiniCPM86LoadFile( void )
         desc = putU16( desc, 0 );                               /* base   */
         desc = putU16( desc, CMD_PARAS( CalcGroupSize( group ) ) ); /* min */
         desc = putU16( desc, CMD_PARAS( CalcGroupSize( group ) ) ); /* max */
+        ndesc++;
+    }
+
+    /* Stage A compact model (`OPTION FARHEAP=<size>`): append a type-3
+     * Extra group descriptor with NO stored image -- its memory is never
+     * written by the linker, only reserved by the loader at load time
+     * (G_Min==G_Max==the requested size, G_Length==0).  Per the CP/M-86
+     * System Guide Sec.2.5, the loader sets ES to this group's base
+     * automatically at program entry -- crt0 needs no code for this at all
+     * (see reference_cpm86_cmd_header.md's Sec.2.5 note).  This descriptor,
+     * being present at all, is what makes the loader treat the whole file
+     * as "Compact Model" instead of "Small Model" -- the model is implicit
+     * in which group types exist, not a separate header flag. */
+    if( CPM86FarHeapSize != 0 && ndesc < CMD_MAX_GROUPS ) {
+        unsigned_16     paras;
+
+        paras = CMD_PARAS( CPM86FarHeapSize );
+        *desc++ = CMD_TYPE_EXTRA;
+        desc = putU16( desc, 0 );          /* length: no stored image   */
+        desc = putU16( desc, 0 );          /* base: relocatable         */
+        desc = putU16( desc, paras );      /* min                       */
+        desc = putU16( desc, paras );      /* max                       */
         ndesc++;
     }
 
