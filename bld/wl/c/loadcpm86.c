@@ -125,13 +125,25 @@ void FiniCPM86LoadFile( void )
     /* Stage A compact model (`OPTION FARHEAP=<size>`): append a type-3
      * Extra group descriptor with NO stored image -- its memory is never
      * written by the linker, only reserved by the loader at load time
-     * (G_Min==G_Max==the requested size, G_Length==0).  Per the CP/M-86
-     * System Guide Sec.2.5, the loader sets ES to this group's base
-     * automatically at program entry -- crt0 needs no code for this at all
-     * (see reference_cpm86_cmd_header.md's Sec.2.5 note).  This descriptor,
-     * being present at all, is what makes the loader treat the whole file
-     * as "Compact Model" instead of "Small Model" -- the model is implicit
-     * in which group types exist, not a separate header flag. */
+     * (G_Length==0).  Per the CP/M-86 System Guide Sec.2.5, the loader sets
+     * ES to this group's base automatically at program entry -- crt0 needs
+     * no code for this at all (see reference_cpm86_cmd_header.md's Sec.2.5
+     * note).  This descriptor, being present at all, is what makes the
+     * loader treat the whole file as "Compact Model" instead of "Small
+     * Model" -- the model is implicit in which group types exist, not a
+     * separate header flag.
+     *
+     * G_Min is deliberately just ONE paragraph, not the same value as
+     * G_Max: G_Min is what the loader must satisfy to run the program at
+     * all (a large G_Min made an early 300K test outright REFUSE to load
+     * under real Concurrent CP/M-86, "For lidt lager", even though less
+     * memory would have been fine) while G_Max=FARHEAP size is only a
+     * ceiling -- CP/M-86's loader grants whatever is actually free between
+     * G_Min and G_Max, and reports the ACTUAL grant back via the base
+     * page's Extra-group length field. port/farheap.c's __AllocSeg already
+     * reads that actual (not requested) size, so this makes `OPTION
+     * FARHEAP=<size>` mean "use up to this much of whatever RAM is really
+     * available", not "fail unless exactly this much is free". */
     if( CPM86FarHeapSize != 0 && ndesc < CMD_MAX_GROUPS ) {
         unsigned_16     paras;
 
@@ -139,8 +151,8 @@ void FiniCPM86LoadFile( void )
         *desc++ = CMD_TYPE_EXTRA;
         desc = putU16( desc, 0 );          /* length: no stored image   */
         desc = putU16( desc, 0 );          /* base: relocatable         */
-        desc = putU16( desc, paras );      /* min                       */
-        desc = putU16( desc, paras );      /* max                       */
+        desc = putU16( desc, 1 );          /* min: just enough to load  */
+        desc = putU16( desc, paras );      /* max: ceiling              */
         ndesc++;
     }
 

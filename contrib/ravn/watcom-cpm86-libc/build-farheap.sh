@@ -23,15 +23,19 @@ WASM="${OWASM_BIN:-$B/wasm/osxa64/wasm.exe}"
 WLINK="${OWLINK_BIN:-$B/wl/osxa64/wlink.exe}"
 EMU2="${EMU2:-/Users/ravn/z80/scratch/cpm86-tools/emu2-cpm86/emu2}"
 
-# FARHEAP size: modest 96 KB (0x18000), still one full 64K slab + one
-# partial (0x18000 = 0x10000 + 0x8000) so multi-slab carving is exercised,
-# but small enough to actually fit in Concurrent CP/M-86's real free-memory
-# budget on real RC759 hardware (384K total RAM minus BDOS/XIOS/console
-# overhead) -- a 300 KB request was rejected outright by Concurrent CP/M-86
-# itself ("Concurrent Fejl: For lidt lager" = too little memory) when tried
-# under MAME 2026-08-18, a real memory-budget constraint distinct from the
-# emu2 oracle (which has no such check and happily ran the 300 KB version).
-FARHEAP_SIZE=0x18000
+# FARHEAP size: a generous CEILING (G_Max), not a fixed target -- wlink now
+# emits G_Min=1 paragraph for the Extra group (loadcpm86.c), so the CP/M-86
+# loader grants whatever is ACTUALLY free between 1 paragraph and this
+# ceiling, never refusing to load outright the way it did (rejected outright
+# under real Concurrent CP/M-86, "Concurrent Fejl: For lidt lager") when
+# G_Min==G_Max==300K exceeded a real machine's free memory. farheaptest.c
+# reads the real grant off the base page at runtime and allocates until
+# _fmalloc fails -- so it always uses "as much far heap as this machine
+# actually has", not a number picked in advance. 0xF0000 (983040 B, just
+# under the 16-bit-paragraph-field's ~1 MB ceiling) is "ask for basically
+# everything"; RC759 hardware will grant far less (its own free-memory
+# figure, once running, is well under this).
+FARHEAP_SIZE=0xF0000
 
 OUTDIR="${OUTDIR:-build-farheap}"; mkdir -p "$OUTDIR"; cd "$OUTDIR"
 SRC=".."
