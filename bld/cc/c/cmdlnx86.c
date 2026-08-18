@@ -157,6 +157,23 @@ static char *setTargetSystem( OPT_STORAGE *data )
     if( target_name != NULL ) {
         if( strcmp( target_name, "DOS" ) == 0 ) {
             TargetSystem = TS_DOS;
+#if _CPU == 8086
+        } else if( strcmp( target_name, "CPM86" ) == 0 ) {
+            /*
+             * CP/M-86 uses the very same 8086 real-mode codegen as MS-DOS
+             * (identical ISA, OMF object format, memory models and calling
+             * conventions). It differs only in the runtime (BDOS software
+             * INT 0E0h vs DOS INT 21h) and the executable format (.CMD group
+             * descriptors vs .COM / MZ .EXE) -- both handled at link time
+             * (wlink FORMAT CPM86) plus the _cpm runtime seam, never in the
+             * compiler. So inherit the DOS target verbatim: TS_DOS has no
+             * codegen effect here (nothing in cg/cc branches on it -- it only
+             * selects the _DOS/MSDOS predefines below), while keeping
+             * target_name "CPM86" makes SetFinalTargetSystem predefine
+             * __CPM86__ so source can tell the two apart with #ifdef __CPM86__.
+             */
+            TargetSystem = TS_DOS;
+#endif
         } else if( strcmp( target_name, "NETWARE" ) == 0 ) {
             TargetSystem = TS_NETWARE;
         } else if( strcmp( target_name, "NETWARE5" ) == 0 ) {
@@ -406,6 +423,17 @@ static void SetFinalTargetSystem( OPT_STORAGE *data, char *target_name )
     if( target_name != NULL ) {
         sprintf( buff, "__%s__", target_name );
         PreDefine_Macro( buff );
+#if _CPU == 8086
+        if( strcmp( target_name, "CPM86" ) == 0 ) {
+            /*
+             * CP/M-86 is a DOS-family target (see setTargetSystem): also make
+             * the __DOS__ marker visible so DOS-gated headers and clib apply,
+             * while __CPM86__ (predefined just above from target_name) lets
+             * source distinguish CP/M-86 from bare MS-DOS.
+             */
+            PreDefine_Macro( "__DOS__" );
+        }
+#endif
     }
 
     PreDefine_Macro( UIMX86 );

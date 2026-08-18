@@ -32,15 +32,19 @@ both are link/runtime concerns, not codegen:
    header) & §4 (memory models). Realized here by native
    `wlink format cpm86` (see below), not a wrapper.
 
-**Distinguishing the two in source — `__CPM86__`.** Verified empirically:
-`-bt=dos` predefines `__DOS__`/`_DOS`/`MSDOS`; `-bt=cpm86` predefines
-`__CPM86__` (auto `__<TARGET>__` from `SetFinalTargetSystem`). Use
-`#ifdef __CPM86__` to select CP/M-86 code paths. **Note:** the production
-wrapper `owcc -bcpm86` currently compiles `-bt=dos` (`flags.mif`
-`sw_c_cpm86 = -bt=dos`), so `__CPM86__` is *not* defined in that shipping
-build — pass `-bt=cpm86` (or `-D__CPM86__`) when you need to distinguish,
-until `-bt=cpm86` is made first-class (inherit `TS_DOS` codegen + predefine
-both the DOS-family macros *and* `__CPM86__`).
+**Distinguishing the two in source — `__CPM86__`.** `-bt=cpm86` is a
+**first-class compiler build target**. Verified empirically: `-bt=dos`
+predefines `__DOS__`/`_DOS`/`MSDOS`; `-bt=cpm86` predefines `__CPM86__`
+**and** `__DOS__`/`_DOS`/`MSDOS`. Use `#ifdef __CPM86__` to select CP/M-86
+code paths; the DOS-family macros keep every DOS-gated header/clib applying
+unchanged. Implementation is a zero-codegen-impact two-liner in
+`bld/cc/c/cmdlnx86.c` (`setTargetSystem` maps `"CPM86"` → `TS_DOS` — nothing
+branches on `TS_DOS` vs the old `TS_OTHER` default except the `_DOS`/`MSDOS`
+predefines; `SetFinalTargetSystem` adds `__DOS__`; both `#if _CPU == 8086`).
+The `owcc -bcpm86` driver already passes `-bt=cpm86` (via
+`bld/wcl/owcc/*/specs.owc`), so the shipping build gets all four macros. (The
+`_cpm` clib variant is still *built* with `-bt=dos` per `flags.mif` — fine,
+identical codegen, and clib needs no `__CPM86__`.)
 
 Primary references are the manuals in this directory
 (`CPM-86_System_Guide_Jun83`, `CPM-86_Programmers_Guide_Jan83`,
