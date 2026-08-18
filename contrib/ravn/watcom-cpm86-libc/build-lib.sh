@@ -34,10 +34,17 @@
 # ===========================================================================
 set -e
 cd "$(dirname "$0")"
+# NOTE: do NOT name the override vars WCC/WASM/WLIB/WLINK -- Open Watcom's
+# own tools read an env var NAMED AFTER THEMSELVES for implicit default
+# switches (confirmed 2026-08-18: an exported WCC=<path to wcc.exe> makes
+# wcc.exe itself parse that path string as bogus extra command-line
+# content -> "E1139: Command line contains more than one file to compile").
+# unset here defensively in case the CALLER's shell exported one of these.
+unset WCC WASM WLIB WLINK
 OW="${OW:-$(cd "$(dirname "$0")/../../.." && pwd)}"; B="$OW/bld"
-WCC="$B/cc/i86/osxa64/binbuild/wcc.exe"
-WASM="$B/wasm/osxa64/wasm.exe"
-WLIB="$B/nwlib/osxa64/wlib.exe"
+WCC="${OWCC_BIN:-$B/cc/i86/osxa64/binbuild/wcc.exe}"
+WASM="${OWASM_BIN:-$B/wasm/osxa64/wasm.exe}"
+WLIB="${OWLIB_BIN:-$B/nwlib/osxa64/wlib.exe}"
 
 OUTDIR="${OUTDIR:-build-lib}"; mkdir -p "$OUTDIR"
 SRC="$(pwd)"
@@ -140,6 +147,17 @@ cw heap/c/nmsize.c    nmsize.obj
 cw heap/c/nexpand.c   nexpand.obj
 cw heap/c/nheapunl.c  nheapunl.obj
 
+echo "==> Layer 1: far heap manager (Stage A compact model)"
+cw heap/c/fmalloc.c   fmalloc.obj
+cw heap/c/ffree.c     ffree.obj
+cw heap/c/fcalloc.c   fcalloc.obj
+cw heap/c/frealloc.c  frealloc.obj
+cw heap/c/fmsize.c    fmsize.obj
+cw heap/c/fheapset.c  fheapset.obj
+cw heap/c/fheapchk.c  fheapchk.obj
+cw heap/c/fheapmin.c  fheapmin.obj
+cw heap/c/fheapwal.c  fheapwal.obj
+
 echo "==> Layer 1: mem helpers"
 cw memory/c/memcpy.c  memcpy.obj
 cw memory/c/memset.c  memset.obj
@@ -166,6 +184,7 @@ echo "==> Layer 2: CP/M-86 seam (BDOS) + closure stubs + port seams"
 "$WCC" $USER $INC "$SRC/port/cominit.c"  -fo=cominit.obj
 "$WCC" $USER $INC "$SRC/port/diskio.c"   -fo=diskio.obj      # FCB BDOS file I/O
 "$WCC" $USER $INC "$SRC/port/lowlevel.c" -fo=lowlevel.obj
+"$WCC" $USER $INC "$SRC/port/farheap.c"  -fo=farheap.obj     # Stage A far heap __AllocSeg/__GrowSeg
 "$WCC" $USER $INC "$SRC/port/errnoptr.c" -fo=errnoptr.obj
 "$WCC" $USER $INC "$SRC/port/abortcpm.c" -fo=abortcpm.obj
 "$WCC" $USER $INC "$SRC/port/portmisc.c" -fo=portmisc.obj    # setmode/signal/environ
