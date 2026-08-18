@@ -35,7 +35,9 @@ unsigned _curbrk = 0;
    DGROUP. Watcom links heap blocks by DGROUP-near pointers, so an in-DGROUP
    array is exactly the right backing store. 20 KB is well above stdcbench's
    ~1.5 KB measured high-water mark, with margin for the c90lib hash tables. */
+#ifndef WC_ARENA_BYTES
 #define WC_ARENA_BYTES  36352u   /* 0x8E00: maxed against 64K DGROUP ceiling (leaves ~70B headroom) */
+#endif
 static char wc_arena[WC_ARENA_BYTES];
 
 /* Seed _curbrk to the arena base. MUST run before the first malloc, because

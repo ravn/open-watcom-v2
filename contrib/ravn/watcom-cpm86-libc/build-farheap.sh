@@ -79,7 +79,17 @@ cw "$B/clib/heap/c/amblksiz.c"  amblksiz.obj
 cw "$B/clib/heap/c/bfree.c"     bfree.obj
 cw "$B/clib/heap/c/_expand.c"   _expand.obj
 cw "$B/clib/heap/c/nmemneed.c"  nmemneed.obj
-"$WCC" $USER $INC "$SRC/port/lowlevel.c" -fo=lowlevel.obj   # wc_heap_init/__brk/sbrk (near-heap seam)
+# WC_ARENA_BYTES=32: this test never calls near-malloc for real -- the full
+# 36352-byte default (shared by other builds that DO use the near heap,
+# e.g. build-heap.sh) would (a) burn ~36K of DGROUP that could otherwise
+# come off the Extra-group budget, and (b) let Watcom's OWN _fmalloc()
+# near-heap fallback (bld/clib/heap/c/fmalloc.c, see farheaptest.c's
+# _getds comment) silently keep "succeeding" past real Extra-group
+# exhaustion, contaminating the measurement. 32 is just enough to avoid a
+# zero-length array; every real allocation here is >=512 bytes so the
+# fallback can never actually satisfy one, and farheaptest.c also detects
+# it directly (belt and suspenders).
+"$WCC" $USER $INC -DWC_ARENA_BYTES=32u "$SRC/port/lowlevel.c" -fo=lowlevel.obj
 
 # --- Layer-1 long helpers (32-bit multiply/divide, for %lu) ---
 "$WASM" -ms -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/i4m.asm" -fo=i4m.obj

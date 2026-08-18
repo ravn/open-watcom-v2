@@ -44,8 +44,24 @@
 
 #include <malloc.h>
 #include <stdlib.h>
+#include <i86.h>        /* FP_SEG */
 
 extern int cprintf( const char *, ... );
+
+/* _getds -- read the CURRENT DS register (== DGROUP's segment). Same
+ * pattern as port/diskio.c's _getds. Used below to detect Watcom's OWN
+ * _fmalloc() fallback: when the far heap proper is exhausted, fmalloc.c
+ * (bld/clib/heap/c/fmalloc.c) tries `_nmalloc()` (the NEAR heap) as a
+ * last resort and returns it disguised as a far pointer with segment ==
+ * _DGroup(). Left undetected, that would silently blend near-heap-backed
+ * allocations into a "far heap" measurement -- this test stops (without
+ * counting) the first time it sees that segment, so `n`/`total` reflect
+ * ONLY the Extra group's real capacity. */
+extern unsigned _getds( void );
+#pragma aux _getds =            \
+    "mov ax,ds"                 \
+    value [ax]                  \
+    modify [ax];
 
 /* Upper bound on how many blocks a run could plausibly need -- generous
    headroom over any real CP/M-86 far-heap budget seen so far (RC759's own
@@ -88,10 +104,22 @@ int main( void )
     total = 0;
     for( n = 0; n < MAXALLOC; n++ ) {
         unsigned trysz = 512u + ( lcg_next() % 3584u );  /* 512..4095 bytes */
+        void __far *cand = _fmalloc( trysz );
 
-        blk[n] = _fmalloc( trysz );
-        if( blk[n] == 0 )
-            break;                      /* far heap exhausted -- done */
+        if( cand == 0 ) {
+            cprintf( "far heap exhausted (real out-of-memory)\n" );
+            break;
+        }
+        if( FP_SEG( cand ) == _getds() ) {
+            /* Watcom's own near-heap fallback kicked in (fmalloc.c falls
+             * back to _nmalloc() once the Extra group is really out of
+             * room) -- this allocation is DGROUP-backed, not Extra-group,
+             * so stop here without counting it. */
+            cprintf( "far heap exhausted (near-heap fallback seg %04x reached)\n",
+                      FP_SEG( cand ) );
+            break;
+        }
+        blk[n] = cand;
         sz[n] = trysz;
         total += trysz;
         start = pattern_start( n );
@@ -100,7 +128,7 @@ int main( void )
         for( j = 0; j < sz[n]; j++ )
             p[j] = (unsigned char)( start + slope * j );
     }
-    cprintf( "allocated %lu bytes in %d blocks (far heap exhausted)\n", total, n );
+    cprintf( "allocated %lu bytes in %d blocks from the Extra group\n", total, n );
 
     fails = 0;
     for( i = 0; i < n; i++ ) {
