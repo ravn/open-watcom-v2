@@ -65,6 +65,7 @@
 #define CMD_TYPE_CODE   1
 #define CMD_TYPE_DATA   2
 #define CMD_TYPE_EXTRA  3
+#define CMD_TYPE_STACK  4
 
 /* number of 16-byte paragraphs needed to hold size bytes */
 #define CMD_PARAS(size) ((unsigned_16)( __ROUND_UP_SIZE_PARA( size ) >> 4 ))
@@ -119,6 +120,43 @@ static bool cpm86GroupIsCode( group_entry *group )
     return( group != NULL && (group->leaders->class->flags & CLASS_CODE) != 0 );
 }
 
+static int cpm86GroupCmdType( group_entry *target )
+/**************************************************
+ * CP/M-86 .CMD group-descriptor type for `target`.  Three coalesced buckets:
+ *
+ *   type-1 CODE  : ALL CLASS_CODE groups (coalesced into one descriptor).
+ *   type-2 DATA  : the DGROUP group (near data: DS/SS), identified via the
+ *                  linker's DataGroup pointer -- NOT by Groups-list position.
+ *   type-3 EXTRA : ALL other non-code groups (far data) coalesced into one
+ *                  descriptor -- one extra ~64K+ segment, NEVER the STACK group.
+ *
+ * A real CP/M-86 loader identifies groups by TYPE (at most one of each), and
+ * the P_LOAD fixup mechanism resolves a group nibble through the base-page
+ * descriptor slot for that type.  So a program's far data MUST live in the
+ * single EXTRA type, not a second type-2 (indistinguishable from DGROUP) and
+ * not type-4 STACK (that group is the stack).  Because each far object's
+ * segment word is relocated individually (EXTRA_load_seg + the object's own
+ * paragraph within the coalesced EXTRA image), the EXTRA image may even exceed
+ * 64K in total as long as no single object does -- a genuine >64K far-data
+ * arena without huge pointers.  See reference_cpm86_big_model.md (far data ->
+ * G-Type=3 Extra) and reference_drc_cpm86_reloc_mechanism_VERIFIED.md.
+ */
+{
+    if( target == NULL )
+        return( 0 );
+    if( cpm86GroupIsCode( target ) )
+        return( CMD_TYPE_CODE );
+    /* DGROUP (the near DS/SS auto-data group) is the ONE type-2 DATA group;
+     * every other non-code group is far data -> the coalesced type-3 EXTRA.
+     * Keying off DataGroup (not Groups-list position) is essential: OrderGroups
+     * can place a FAR_DATA/AUTO group AHEAD of DGROUP, so "first non-code" is
+     * NOT DGROUP -- an earlier position-based guess put far data in type-2 and
+     * DGROUP in type-3, exactly inverted. */
+    if( target == DataGroup )
+        return( CMD_TYPE_DATA );
+    return( CMD_TYPE_EXTRA );
+}
+
 static offset cpm86GroupImgPara( group_entry *target )
 /*****************************************************
  * Paragraph offset of `target`'s stored image within its CP/M-86 group
@@ -141,17 +179,38 @@ static offset cpm86GroupImgPara( group_entry *target )
 {
     group_entry     *group;
     offset          para = 0;
-    bool            want_code;
 
     if( target == NULL )
         return( 0 );
-    want_code = cpm86GroupIsCode( target );
+    if( cpm86GroupIsCode( target ) ) {
+        /* CODE groups are coalesced into one type-1 descriptor: sum preceding
+         * non-empty code groups. */
+        for( group = Groups; group != NULL; group = group->next ) {
+            if( group == target )
+                break;
+            if( CalcGroupSize( group ) == 0 )
+                continue;
+            if( !cpm86GroupIsCode( group ) )
+                continue;
+            para += CMD_PARAS( CalcGroupSize( group ) );
+        }
+        return( para );
+    }
+    /* DGROUP (the first non-code group, type-2 DATA) is its own descriptor,
+     * image base paragraph 0 -- the word's position is fix->loc_off alone. */
+    if( cpm86GroupCmdType( target ) == CMD_TYPE_DATA )
+        return( 0 );
+    /* A far-data group (type-3 EXTRA): all far groups are coalesced into ONE
+     * EXTRA descriptor, so this group's image base is the running paragraph sum
+     * of the preceding non-empty EXTRA groups.  The fixup then relocates the
+     * far object's segment word to EXTRA_load_seg + this paragraph, giving each
+     * far object its own segment base within the shared EXTRA image. */
     for( group = Groups; group != NULL; group = group->next ) {
         if( group == target )
             break;
         if( CalcGroupSize( group ) == 0 )
             continue;
-        if( cpm86GroupIsCode( group ) != want_code )
+        if( cpm86GroupCmdType( group ) != CMD_TYPE_EXTRA )
             continue;
         para += CMD_PARAS( CalcGroupSize( group ) );
     }
@@ -201,24 +260,24 @@ static void cpm86WriteFixups( unsigned_8 *header )
     for( fix = CPM86Fixups; fix != NULL; fix = fix->next ) {
         group_entry     *loc_grp;
         group_entry     *tgt_grp;
-        bool            loc_code;
-        bool            tgt_code;
         unsigned long   loc_flat;
         unsigned_16     para;
 
         loc_grp = FindGroup( fix->loc_seg );
         tgt_grp = FindGroup( fix->tgt_seg );
-        loc_code = cpm86GroupIsCode( loc_grp );
-        tgt_code = cpm86GroupIsCode( tgt_grp );
         /* byte offset of the far-segment word within its descriptor image:
          * (location group's image paragraph) * 16 + its offset in the group.
          * The loader reads para (>>4) and offs (&15) and computes the address
          * as (loc_group_load_seg + para)*16 + offs. */
         loc_flat = (unsigned long)cpm86GroupImgPara( loc_grp ) * CMD_PARA_SIZE + fix->loc_off;
         para = (unsigned_16)( loc_flat >> 4 );
-        /* hi nibble = LOCATION group type, lo nibble = TARGET group type */
-        rec[0] = (unsigned_8)( ( ( loc_code ? CMD_TYPE_CODE : CMD_TYPE_DATA ) << 4 )
-                             | ( tgt_code ? CMD_TYPE_CODE : CMD_TYPE_DATA ) );
+        /* hi nibble = LOCATION group type, lo nibble = TARGET group type.
+         * Encode each group's ACTUAL assigned CMD type (cpm86GroupCmdType), not
+         * a code/data binary: a far-data target lives in a type-3 EXTRA group,
+         * so its fixups must name type 3 -- the loader resolves the nibble via
+         * the base-page descriptor slot for that type. */
+        rec[0] = (unsigned_8)( ( cpm86GroupCmdType( loc_grp ) << 4 )
+                             | ( cpm86GroupCmdType( tgt_grp ) & 0x0F ) );
         rec[1] = (unsigned_8)para;
         rec[2] = (unsigned_8)( para >> 8 );
         rec[3] = (unsigned_8)( loc_flat & 0x0F );
@@ -240,6 +299,7 @@ void FiniCPM86LoadFile( void )
     group_entry     *group;
     unsigned_8      header[CMD_HDR_SIZE];
     unsigned_8      *desc;
+    unsigned_8      *extra_max_field = NULL; /* -> EXTRA descriptor's G_Max word */
     int             ndesc;
     offset          img_len;
     size_t          pad;
@@ -299,34 +359,78 @@ void FiniCPM86LoadFile( void )
         }
     }
 
-    /* Now the non-CODE groups (DATA, and any others): one descriptor each,
-     * written after the coalesced code image so the loader reads code then
-     * data contiguously. */
-    for( group = Groups; group != NULL; group = group->next ) {
-        if( ndesc >= CMD_MAX_GROUPS )
-            break;
-        if( CalcGroupSize( group ) == 0 )
-            continue;
-        if( group->leaders->class->flags & CLASS_CODE )
-            continue;
-        CurrSect = group->section;
-        img_len = WriteGroupLoad( group, false );   /* stored image bytes */
-        /* Pad the stored image to a PARAGRAPH (16-byte) boundary so its byte
-         * length equals the paragraph "length" written into the descriptor
-         * below.  The loader locates each following group at base + length*16,
-         * so padding to a 128-byte record here while declaring only the
-         * paragraph length would leave the next group's image 0..112 bytes
-         * past where the loader reads it -- making all of its data come back
-         * zero.  Genuine DRI .CMD files pack groups at paragraph granularity. */
-        pad = (size_t)( -(long)img_len & ( CMD_PARA_SIZE - 1 ) );
-        if( pad != 0 )
-            PadLoad( pad );
-        *desc++ = CMD_TYPE_DATA;
-        desc = putU16( desc, CMD_PARAS( img_len ) );            /* length */
-        desc = putU16( desc, 0 );                               /* base   */
-        desc = putU16( desc, CMD_PARAS( CalcGroupSize( group ) ) ); /* min */
-        desc = putU16( desc, CMD_PARAS( CalcGroupSize( group ) ) ); /* max */
-        ndesc++;
+    /* Non-CODE groups, written after the coalesced code image so the loader
+     * reads code then data contiguously.  Two buckets (see cpm86GroupCmdType):
+     *   - the FIRST non-code group is DGROUP -> its own type-2 DATA descriptor;
+     *   - ALL remaining non-code (far data) groups are COALESCED, exactly like
+     *     the code groups above, into ONE type-3 EXTRA descriptor -- one extra
+     *     segment, never STACK, and (since each far object's segment is fixed
+     *     up individually) allowed to span >64K in total.
+     * Their images are written contiguously and paragraph-packed; the two
+     * paragraph sums (DGROUP, EXTRA) go into their respective descriptors. */
+    {
+        offset      data_img_paras = 0, data_alloc_paras = 0;
+        offset      extra_img_paras = 0, extra_alloc_paras = 0;
+        bool        have_data = false, have_extra = false;
+
+        /* Pass 1: DGROUP (type-2 DATA) image FIRST, so the on-disk image order
+         * matches the descriptor order below (CODE, DATA, EXTRA).  CP/M-86
+         * concatenates group images in descriptor order with no per-descriptor
+         * file offset, so a group's image must be written in the same order its
+         * descriptor appears -- and OrderGroups can list a FAR_DATA group ahead
+         * of DGROUP, so we cannot rely on Groups-list order here. */
+        for( group = Groups; group != NULL; group = group->next ) {
+            if( CalcGroupSize( group ) == 0 )
+                continue;
+            if( group->leaders->class->flags & CLASS_CODE )
+                continue;
+            if( cpm86GroupCmdType( group ) != CMD_TYPE_DATA )
+                continue;
+            CurrSect = group->section;
+            img_len = WriteGroupLoad( group, false );   /* stored image bytes */
+            pad = (size_t)( -(long)img_len & ( CMD_PARA_SIZE - 1 ) );
+            if( pad != 0 )
+                PadLoad( pad );
+            data_img_paras += CMD_PARAS( img_len );
+            data_alloc_paras += CMD_PARAS( CalcGroupSize( group ) );
+            have_data = true;
+        }
+        /* Pass 2: all far-data groups (type-3 EXTRA) coalesced, in Groups order
+         * -- matching cpm86GroupImgPara()'s running paragraph sum so each far
+         * object's fixup lands at EXTRA_load_seg + its own paragraph. */
+        for( group = Groups; group != NULL; group = group->next ) {
+            if( CalcGroupSize( group ) == 0 )
+                continue;
+            if( group->leaders->class->flags & CLASS_CODE )
+                continue;
+            if( cpm86GroupCmdType( group ) != CMD_TYPE_EXTRA )
+                continue;
+            CurrSect = group->section;
+            img_len = WriteGroupLoad( group, false );   /* stored image bytes */
+            pad = (size_t)( -(long)img_len & ( CMD_PARA_SIZE - 1 ) );
+            if( pad != 0 )
+                PadLoad( pad );
+            extra_img_paras += CMD_PARAS( img_len );
+            extra_alloc_paras += CMD_PARAS( CalcGroupSize( group ) );
+            have_extra = true;
+        }
+        if( have_data && ndesc < CMD_MAX_GROUPS ) {
+            *desc++ = CMD_TYPE_DATA;
+            desc = putU16( desc, (unsigned_16)data_img_paras );     /* length */
+            desc = putU16( desc, 0 );                               /* base   */
+            desc = putU16( desc, (unsigned_16)data_alloc_paras );   /* min    */
+            desc = putU16( desc, (unsigned_16)data_alloc_paras );   /* max    */
+            ndesc++;
+        }
+        if( have_extra && ndesc < CMD_MAX_GROUPS ) {
+            *desc++ = CMD_TYPE_EXTRA;
+            desc = putU16( desc, (unsigned_16)extra_img_paras );    /* length */
+            desc = putU16( desc, 0 );                               /* base   */
+            desc = putU16( desc, (unsigned_16)extra_alloc_paras );  /* min    */
+            extra_max_field = desc;                                 /* G_Max  */
+            desc = putU16( desc, (unsigned_16)extra_alloc_paras );  /* max    */
+            ndesc++;
+        }
     }
 
     /* Stage A compact model (`OPTION FARHEAP=<size>`): append a type-3
@@ -351,16 +455,31 @@ void FiniCPM86LoadFile( void )
      * reads that actual (not requested) size, so this makes `OPTION
      * FARHEAP=<size>` mean "use up to this much of whatever RAM is really
      * available", not "fail unless exactly this much is free". */
-    if( CPM86FarHeapSize != 0 && ndesc < CMD_MAX_GROUPS ) {
+    if( CPM86FarHeapSize != 0 ) {
         unsigned_16     paras;
 
         paras = CMD_PARAS( CPM86FarHeapSize );
-        *desc++ = CMD_TYPE_EXTRA;
-        desc = putU16( desc, 0 );          /* length: no stored image   */
-        desc = putU16( desc, 0 );          /* base: relocatable         */
-        desc = putU16( desc, 1 );          /* min: just enough to load  */
-        desc = putU16( desc, paras );      /* max: ceiling              */
-        ndesc++;
+        if( extra_max_field != NULL ) {
+            /* A far-DATA EXTRA descriptor already exists (initialised far data).
+             * Do NOT emit a second type-3 -- CP/M-86 keys groups by type and
+             * cannot place two.  Instead give that same EXTRA segment its heap
+             * headroom by raising its G_Max to cover the far-data image PLUS the
+             * requested heap, so one Extra group holds both (and can exceed 64K).
+             * port/farheap.c carves the heap from ES beyond the loaded image. */
+            unsigned_16 cur = (unsigned_16)( extra_max_field[0] | ( extra_max_field[1] << 8 ) );
+            unsigned_16 want = (unsigned_16)( cur + paras );
+            if( want < cur )                    /* 16-bit paragraph overflow */
+                want = 0xFFFF;
+            extra_max_field[0] = (unsigned_8)want;
+            extra_max_field[1] = (unsigned_8)( want >> 8 );
+        } else if( ndesc < CMD_MAX_GROUPS ) {
+            *desc++ = CMD_TYPE_EXTRA;
+            desc = putU16( desc, 0 );          /* length: no stored image   */
+            desc = putU16( desc, 0 );          /* base: relocatable         */
+            desc = putU16( desc, 1 );          /* min: just enough to load  */
+            desc = putU16( desc, paras );      /* max: ceiling              */
+            ndesc++;
+        }
     }
 
     /* Stage B: emit the P_LOAD fixup table for cross-group far segment refs
