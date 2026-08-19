@@ -106,7 +106,10 @@ paragraphs), followed by RSX/fixup/flags fields. Verified against Digital
 Research's *CP/M-86 System Guide* (Command File Format appendix) and the
 seasip.info archive. The linker's writer lives in `bld/wl/c/loadcpm86.c`
 (+ `cmdcpm86.c`); the Unicorn runner (`cpm86run_unicorn.py`) carries a small
-read-only `parse_header()` to inspect the descriptors when loading.
+read-only `parse_header()` to inspect the descriptors when loading, and
+`_apply_fixups()` — a port of the CCP/M loader (`load.sup:402-449`) — to apply
+byte-127-bit7 / `ch_fixrec` load-time relocation exactly as a genuine loader
+does (unit tests: `test_cpm86_reloc.py`).
 
 ### The system-call layer (`hello.asm` / `hello.c`)
 
@@ -413,7 +416,8 @@ emulator demo, not a portable CP/M-86 program.
 | `BIGDATA.CMD` | ready-to-run >64 KB data-structure checksum demo (prebuilt reference) |
 | `mkdisk-cpm86.sh` | pack the `.CMD` files into a CP/M-86 disk image (cpmtools) for full-machine emulators |
 | `cpm86run.py` | minimal hand-written 8086 interpreter + BDOS |
-| `cpm86run_unicorn.py` | independent Unicorn/QEMU runner + BDOS console group (`--count`, `--ticks`) |
+| `cpm86run_unicorn.py` | independent Unicorn/QEMU runner + BDOS console group (`--count`, `--ticks`); applies P_LOAD load-time relocation |
+| `test_cpm86_reloc.py` | self-contained unit tests for the runner's `_apply_fixups()` load-time relocation |
 | `cycles186.py` | iAPX 186 (80186) clock-cycle estimator ("ticks") — capstone decode + clock table |
 | `bench.py` | oracle/baseline harness: `measure` / `compare` / `baseline` (DR C = 1.00× baseline) |
 | `bench.sh` | reproducible driver: builds Dhrystone O0/O3/mixed vs the DR C oracle and prints the matrix |
