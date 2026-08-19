@@ -9,8 +9,8 @@
 # Built only for system=cpm86 (host_os=dos, so the sources compile with the
 # same __DOS__ target as the OS-agnostic components they satisfy).
 
-objs_cpm86_086 = abortcpm.obj cominit.obj dirent.obj diskio.obj errnoptr.obj &
-                 gtctmcpm.obj lowlevel.obj portmisc.obj stubs.obj
+objs_cpm86_086 = abortcpm.obj cominit.obj cstartcpm.obj dirent.obj diskio.obj &
+                 errnoptr.obj gtctmcpm.obj lowlevel.obj portmisc.obj stubs.obj
 
 !ifeq objsuffix files
 objfiles = $+ $(objs_$(system)_$(processor)) $-

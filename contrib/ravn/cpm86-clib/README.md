@@ -9,9 +9,14 @@ rebuilt **entirely from git** after any `clean.sh`.
 The wlink `system begin cpm86` block (committed in `bld/wl/lnk/specs.sp`)
 references:
 
-- `libfile cstartcpm.obj` — the CP/M-86 C startup, and
-- `libpath '%WATCOM%/lib286/cpm86'` — where it auto-fetches `clibs.lib`
-  (the object's `CMT_DEFAULT_LIBRARY "clibs"` record drives the auto-fetch).
+- `libpath '%WATCOM%/lib286/cpm86'` — where it auto-fetches the model clib
+  (`clibs.lib` for small, `clibm.lib` for medium; the object's
+  `CMT_DEFAULT_LIBRARY` record drives the model-correct auto-fetch), and
+- `format cpm86` — whose implicit start symbol `_cstart_` pulls the C startup
+  as a **library member** of that same clib (its entry sits in the front-sorted
+  `BEGTEXT` segment, so it still lands at code-group offset 0). This mirrors
+  Open Watcom's 16-bit `system dos` target, whose block force-includes NO
+  startup via `libfile` — the startup is auto-selected from the model clib.
 
 Both live under `open-watcom-v2/lib286/cpm86/`, which is **build output** and is
 git-ignored (`.gitignore` line `/*/`). A full `clean.sh` / `builder -i clean`

@@ -3,7 +3,11 @@
 # Same OS-agnostic component set as library/msdos.086/libs.mif, but:
 #   - the OS layer `_dos` (INT 21h) is replaced by `_cpm` (BDOS INT 0E0h);
 #   - the DOS `startup` component is dropped (cpm86 supplies its own startup,
-#     _cpm/.../cstartcpm.obj, linked by wlink's `system cpm86` block).
+#     _cpm/.../cstartcpm.obj). That startup is ARCHIVED into `_cpm`'s clibs.lib
+#     (its entry is in the front-sorted BEGTEXT segment, so a library-member
+#     pull still lands _cstart_ at code-group offset 0), so wlink's `system
+#     cpm86` block auto-selects it via the object's default-library record with
+#     NO `libfile` -- exactly the 16-bit `system dos` convention.
 # `_cpm` is listed FIRST so its diskio.obj owns the fd-layer symbols
 # (__qwrite/__qread/__lseek/__close/_sopen/isatty/...) in the merged archive
 # dictionary; the DOS-coupled handleio objects (qwrit.obj/__lseek.obj, which

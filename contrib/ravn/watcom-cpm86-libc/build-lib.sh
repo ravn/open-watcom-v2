@@ -20,11 +20,18 @@
 #            portmisc.c (getenv/setmode/signal/localtime/tzset seams).
 #   Layer 3  BDOS (INT E0h) -- reached only through Layer 2.
 #
-# The startup object crt0sm.asm (public _cstart_) is emitted SEPARATELY (a
-# start module must be an explicit linker `file`, not pulled from a library),
-# alongside the archive, so a program links:
-#     wlink format cpm86 op dosseg file crt0.obj file <prog>.obj \
-#           library clibcpm.lib name PROG.CMD
+# The startup object crt0sm.asm / crt0mm.asm (public _cstart_) is BOTH archived
+# as a member of clibs.lib/clibm.lib AND emitted separately as cstartcpm.obj/
+# cstartmm.obj. Its entry sits in the front-sorted 'BEGTEXT' segment, so under
+# `option dosseg` it lands at code-group offset 0 (the CP/M-86 fixed CS:0000
+# entry) even when pulled from the library -- mirroring Open Watcom's 16-bit
+# `system dos` target, whose linker block force-includes NO startup and instead
+# auto-selects it from the model clib via the object's default-library record.
+# So `owcc -bcpm86 -mcmodel={s,m} prog.c` links with NO explicit file/library:
+#     wlink format cpm86 op dosseg op start=_cstart_ ...   (specs.sp system cpm86)
+# auto-fetches clibs.lib (small) or clibm.lib (medium) which brings the matching
+# startup first. The standalone cstartcpm.obj/cstartmm.obj remain for the
+# explicit-`file` demo scripts (build.sh, build-medium.sh).
 #
 # NOTE: deliberately EXCLUDES the scanf family (scnf/fscanf) and the 8087
 # float emulator (FIDRQQ/FIERQQ/FIWRQQ, __U8M).  Nothing in the string/FILE*
@@ -50,9 +57,25 @@ OUTDIR="${OUTDIR:-build-lib}"; mkdir -p "$OUTDIR"
 SRC="$(pwd)"
 cd "$OUTDIR"
 
+# MODEL selects the CP/M-86 memory model to build the library for:
+#   s (default) = small  : near code + near data, ONE <=64 KB CODE segment.
+#   m           = medium : FAR code (>64 KB, per-function *_TEXT segments via
+#                          -zm, coalesced by wlink into one Code Group
+#                          Descriptor -- Stage B), near data (DGROUP unchanged).
+# Everything shared with DOS 16-bit (the whole OS-agnostic Watcom clib source)
+# is simply recompiled with -m$MODEL; only the model flag differs, no source
+# changes. The CP/M-86 (BDOS) seam recompiles the same way. See README.
+MODEL="${MODEL:-s}"
+case "$MODEL" in
+  s) ZMFLAG=""    ; CRT0SRC="crt0sm.asm" ; LIBNAME="clibs.lib"  ; CRT0NAME="cstartcpm.obj" ;;
+  m) ZMFLAG="-zm" ; CRT0SRC="crt0mm.asm" ; LIBNAME="clibm.lib"  ; CRT0NAME="cstartmm.obj"  ;;
+  *) echo "MODEL must be s or m (got '$MODEL')" >&2; exit 1 ;;
+esac
+echo "==> building CP/M-86 clib for MODEL=$MODEL  (-m$MODEL $ZMFLAG -> $LIBNAME + $CRT0NAME)"
+
 INC="-i=$B/lib_misc/h -i=$B/clib/streamio/h -i=$B/clib/string/h -i=$B/clib/time/h -i=$B/clib/h -i=$B/clib/heap/h -i=$B/clib/intel/h -i=$B/comp_cfg/h -i=$B/watcom/h -i=$B/hdr/dos/h"
-CLIB="-bt=dos -0 -ms -zastd=c99 -zl -x"        # compile stock Watcom clib source
-USER="-bt=dos -0 -ms -zl -zastd=c99"           # compile our port seam
+CLIB="-bt=dos -0 -m$MODEL $ZMFLAG -zastd=c99 -zl -x"    # compile stock Watcom clib source
+USER="-bt=dos -0 -m$MODEL $ZMFLAG -zl -zastd=c99"       # compile our port seam
 
 cw() { "$WCC" $CLIB $INC "$B/clib/$1" -fo="$2"; }   # compile a Watcom clib source
 
@@ -177,8 +200,8 @@ cw time/c/time.c      time.obj        # time() -> __getctime()+mktime() (unchang
 echo "==> Layer 1: environment (real getenv over our empty environ)"
 
 echo "==> Layer 1: long mul/div helpers (%ld, lseek arithmetic)"
-"$WASM" -ms -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/i4m.asm" -fo=i4m.obj
-"$WASM" -ms -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/i4d.asm" -fo=i4d.obj
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/i4m.asm" -fo=i4m.obj
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/i4d.asm" -fo=i4d.obj
 
 echo "==> Layer 2: CP/M-86 seam (BDOS) + closure stubs + port seams"
 "$WCC" $USER $INC "$SRC/port/cominit.c"  -fo=cominit.obj
@@ -193,13 +216,16 @@ echo "==> Layer 2: CP/M-86 seam (BDOS) + closure stubs + port seams"
 # diskio.c owns the real __lseek/tolower/etc.; drop those overlapping stubs.
 "$WCC" $USER $INC -DDISKIO_LSEEK "$SRC/port/stubs.c" -fo=stubs.obj
 
-echo "==> startup (emitted separately, linked as an explicit file)"
-"$WASM" -ms -0 "$SRC/port/crt0sm.asm" -fo=crt0.obj
+echo "==> startup (archived as a library member AND emitted as a standalone obj)"
+"$WASM" -m$MODEL -0 "$SRC/port/$CRT0SRC" -fo=crt0.obj
 
 echo "==> archive clibcpm.lib"
 rm -f clibcpm.lib
-# every object EXCEPT crt0.obj (a start module must be an explicit linker file)
+# crt0.obj is included: its entry is in the front-sorted BEGTEXT segment, so a
+# library-member pull still lands _cstart_ at code-group offset 0 (16-bit `dos`
+# convention). No other archive member defines _cstart_/__STK/__argc/__argv.
 "$WLIB" -q -b clibcpm.lib \
+    +crt0.obj \
     +strlen.obj +strcmp.obj +strcpy.obj +strncpy.obj +strcat.obj +strncmp.obj \
     +strnicmp.obj +strchr.obj +strrchr.obj +strupr.obj +strerror.obj \
     +sprintf.obj +vsprintf.obj +istable.obj \
@@ -231,19 +257,23 @@ echo "modules in archive:"
 
 # Install as the CANONICAL cpm86 standard library.
 #
-# owcc -bcpm86 links via `system cpm86` (bld/wl/lnk/osxa64/wlink.lnk): it does
-#   libfile cstartcpm.obj          <- the C startup, auto-linked
+# owcc -bcpm86 links via `system cpm86` (bld/wl/lnk/specs.sp): it sets
 #   libpath '%WATCOM%/lib286/cpm86' <- where the auto-fetched clib is searched
-# and the compiled objects carry a default-library record naming `clibs`, so
-# wlink auto-fetches clibs.lib from that dir. Dropping the FULL clib in as
-# clibs.lib (and crt0.obj as cstartcpm.obj) makes a bare
-#   owcc -bcpm86 prog.c -o PROG.CMD
-# link the whole library + real startup with NO explicit `library`/`file` on
-# the link line — superseding the old 4-module proof-of-concept stub
-# (contrib/ravn/cpm86-clib/build.sh). lib286/cpm86 is a .gitignored install dir.
+#   format cpm86                    <- whose implicit start symbol is _cstart_
+# and the compiled objects carry a default-library record naming `clibs` (small)
+# or `clibm` (medium), so wlink auto-fetches the matching model lib from that
+# dir. Because crt0 is ARCHIVED as a member (entry in the front-sorted BEGTEXT
+# segment -> still lands at code-group offset 0), the format's implicit _cstart_
+# reference pulls the startup FIRST from that same lib -- no `libfile`, exactly
+# the 16-bit `system dos` convention. So a bare
+#   owcc -bcpm86 -mcmodel={s,m} prog.c -o PROG.CMD
+# links the whole model-correct library + startup with NO explicit
+# `library`/`file` on the link line. The standalone crt0.obj (cstartcpm.obj/
+# cstartmm.obj) is kept only for the explicit-`file` demo scripts.
+# lib286/cpm86 is a .gitignored install dir.
 DEST="$OW/lib286/cpm86"
 mkdir -p "$DEST"
-cp clibcpm.lib "$DEST/clibs.lib"
-cp crt0.obj    "$DEST/cstartcpm.obj"
-echo "==> installed canonical: $DEST/{clibs.lib,cstartcpm.obj}"
+cp clibcpm.lib "$DEST/$LIBNAME"
+cp crt0.obj    "$DEST/$CRT0NAME"
+echo "==> installed canonical: $DEST/{$LIBNAME,$CRT0NAME}"
 echo "DONE."

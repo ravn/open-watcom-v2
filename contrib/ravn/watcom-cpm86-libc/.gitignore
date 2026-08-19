@@ -19,3 +19,5 @@ build-diskio-ibm/
 build-fscanf/
 build-streamio/
 build-farheap/
+build-lib-mm/
+MEDTEST.CMD

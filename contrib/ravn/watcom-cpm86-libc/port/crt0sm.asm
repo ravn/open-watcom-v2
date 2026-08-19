@@ -9,8 +9,18 @@ _small_code_    equ     0
 
 DGROUP  group   BEGDATA, _DATA, STACK
 
-_TEXT   segment word public 'CODE'
-        assume  cs:_TEXT, ds:DGROUP, ss:DGROUP
+; The entry lives in BEGTEXT (not _TEXT). Under `option dosseg` wlink keeps the
+; 'BEGTEXT' segment in front of every other CODE-class segment, so `_cstart_`
+; lands at code-group offset 0 (= the CP/M-86 loader's fixed CS:0000 entry, as
+; .CMD has no entry-point field) EVEN WHEN THIS MODULE IS PULLED FROM A LIBRARY
+; rather than force-included via `libfile`. That is what lets the CP/M-86
+; startup be a plain member of clibs.lib/clibm.lib, auto-selected by the
+; object's default-library record exactly like Open Watcom's 16-bit `system
+; dos` target (which has NO `libfile` in its linker system block). In small
+; model BEGTEXT and _TEXT coalesce into the one CODE group, so the near calls
+; below to main_/wc_heap_init_/__CommonInit_ (in _TEXT) resolve within it.
+BEGTEXT segment word public 'CODE'
+        assume  cs:BEGTEXT, ds:DGROUP, ss:DGROUP
 ; Entry CS:0000. Loader already set DS=ES=data group + a 96-byte scratch stack.
 ; Do NOT touch DS/ES; just move SS to DS and set SP to the top of our DGROUP stack.
 _cstart_:
@@ -79,7 +89,7 @@ ct_done:
 ; Watcom stack-overflow check helper — no-op stub (no clib on CP/M-86 yet)
 __STK:
         ret
-_TEXT   ends
+BEGTEXT ends
 
 BEGDATA segment word public 'BEGDATA'
         db      100h dup(0)             ; base page area DS:0000-00FF
