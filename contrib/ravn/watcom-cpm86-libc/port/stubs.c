@@ -40,6 +40,27 @@ long __lseek( int handle, long offset, int origin )
 
 int fsync( int handle ) { (void)handle; return( -1 ); }
 
+/* _nheapgrow -- CP/M-86 seam replacing the DOS near-heap "grow to 64K" step.
+ *
+ * Why this lives here (not the stock heap/c/heapgrow.c): in COMPACT/large-data
+ * models (-mc, __BIG_DATA__) Watcom's fmalloc.c compiles a DOS-only init entry
+ *     #if defined(__DOS__) && defined(__BIG_DATA__)
+ *       static void ___nheapgrow(void){ _nheapgrow(); }  AXIN(___nheapgrow,...)
+ * which registers ___nheapgrow in the XI/AXI startup-init table. Our minimal
+ * crt0 (port/crt0cm.asm) does NOT walk that table -- it calls __CommonInit by
+ * hand -- so ___nheapgrow is DEAD CODE at runtime. But the OMF init record
+ * still holds its ADDRESS, so the linker must resolve _nheapgrow, and the stock
+ * heapgrow.c version drags in genuine DOS internals (_osmode_PROTMODE == __osmode,
+ * _RWD_psp == __psp, TinyMaxSet == INT 21h realloc) that do not exist on CP/M-86.
+ *
+ * On CP/M-86 there is no DOS-style pre-grow: the near heap IS the DGROUP arena,
+ * grown on demand by port/lowlevel.c's sbrk/__brk as _nmalloc needs it. So the
+ * correct CP/M behaviour for "grow near heap to 64K up front" is simply nothing.
+ * (Defined for all models; in small/medium fmalloc.c does not reference it, so
+ * this object member is only pulled into the compact clib.) */
+void _nheapgrow( void ) {}
+
+
 /* errno storage: fputc/flush reference the C `errno` datum (OMF symbol _errno;
    single-thread small model uses a plain global). The real one lives in RT data
    we don't link, so define it here. (`port/errnoptr.c` owns `__get_errno_ptr`,

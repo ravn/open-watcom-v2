@@ -62,6 +62,14 @@ cd "$OUTDIR"
 #   m           = medium : FAR code (>64 KB, per-function *_TEXT segments via
 #                          -zm, coalesced by wlink into one Code Group
 #                          Descriptor -- Stage B), near data (DGROUP unchanged).
+#   c           = compact : near code (ONE <=64 KB CODE segment, like small) +
+#                          FAR data. -mc defines __BIG_DATA__, which flips
+#                          Watcom's fmalloc.c so plain malloc()/calloc()/etc.
+#                          redirect to the FAR heap (_fmalloc, port/farheap.c's
+#                          __AllocSeg segments carved from the .CMD Extra group).
+#                          Message strings / far CONST also leave DGROUP. This
+#                          is the model UnZip's DEFLATE window needs -- link
+#                          compact programs with `option farheap=<size>`.
 # Everything shared with DOS 16-bit (the whole OS-agnostic Watcom clib source)
 # is simply recompiled with -m$MODEL; only the model flag differs, no source
 # changes. The CP/M-86 (BDOS) seam recompiles the same way. See README.
@@ -69,7 +77,17 @@ MODEL="${MODEL:-s}"
 case "$MODEL" in
   s) ZMFLAG=""    ; CRT0SRC="crt0sm.asm" ; LIBNAME="clibs.lib"  ; CRT0NAME="cstartcpm.obj" ;;
   m) ZMFLAG="-zm" ; CRT0SRC="crt0mm.asm" ; LIBNAME="clibm.lib"  ; CRT0NAME="cstartmm.obj"  ;;
-  *) echo "MODEL must be s or m (got '$MODEL')" >&2; exit 1 ;;
+  # KNOWN-BLOCKED at runtime: compact model makes clib globals (e.g.
+  # int __heap_enabled=1) FAR, which wlink's `format cpm86` emits as a SECOND
+  # type=2 group the CP/M-86 .CMD loader (groups keyed by TYPE 1-8) cannot
+  # place -> those globals read 0 -> __heap_enabled==0 -> malloc()==NULL.
+  # Root cause is a wlink/loader limitation, not this clib; fixing it needs
+  # wlink to emit compact far-data as its own loader-placeable group + far
+  # relocation. Until then use MODEL=s + explicit _fmalloc (proven working:
+  # test/farheap_smalltest.c, build-farheap-small.sh). This target still
+  # builds clibc.lib cleanly as the foundation for that future wlink work.
+  c) ZMFLAG=""    ; CRT0SRC="crt0cm.asm" ; LIBNAME="clibc.lib"  ; CRT0NAME="cstartcm.obj"  ;;
+  *) echo "MODEL must be s, m or c (got '$MODEL')" >&2; exit 1 ;;
 esac
 echo "==> building CP/M-86 clib for MODEL=$MODEL  (-m$MODEL $ZMFLAG -> $LIBNAME + $CRT0NAME)"
 
@@ -176,6 +194,7 @@ cw heap/c/ffree.c     ffree.obj
 cw heap/c/fcalloc.c   fcalloc.obj
 cw heap/c/frealloc.c  frealloc.obj
 cw heap/c/fmsize.c    fmsize.obj
+cw heap/c/fmemneed.c  fmemneed.obj
 cw heap/c/fheapset.c  fheapset.obj
 cw heap/c/fheapchk.c  fheapchk.obj
 cw heap/c/fheapmin.c  fheapmin.obj
@@ -242,6 +261,9 @@ rm -f clibcpm.lib
     +nmalloc.obj +nfree.obj +calloc.obj +nrealloc.obj +grownear.obj \
     +amblksiz.obj +heapen.obj +nheapmin.obj +mem.obj +bfree.obj +_expand.obj \
     +nmemneed.obj +nmsize.obj +nexpand.obj +nheapunl.obj \
+    +fmalloc.obj +ffree.obj +fcalloc.obj +frealloc.obj +fmsize.obj \
+    +fmemneed.obj +fheapset.obj +fheapchk.obj +fheapmin.obj +fheapwal.obj \
+    +farheap.obj \
     +memcpy.obj +memset.obj +memmove.obj +memcmp.obj +gmtime.obj \
     +i4m.obj +i4d.obj \
     +cominit.obj +diskio.obj +lowlevel.obj +errnoptr.obj +abortcpm.obj \
