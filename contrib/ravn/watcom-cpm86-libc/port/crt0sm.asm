@@ -104,8 +104,20 @@ __argv  label   word                    ; keep the public symbol some objs EXTRN
 _argvtab dw     33 dup(0)               ; argv[]: 32 slots + NULL terminator
 _DATA   ends
 
+; Stack size. 512 bytes is far too small for deep call chains: INFO-Zip UnZip's
+; DEFLATE path nests inflate -> inflate_block -> inflate_dynamic -> inflate_codes
+; -> flush -> write -> __qwrite -> load_record -> _bdos (~13 frames), overflowing
+; a 512-byte stack DOWN into the near-heap arena (wc_arena sits just below STACK
+; in DGROUP). That corrupted write()'s saved return address, so returning from a
+; 32 KB window flush did a wild far jump (printed the " April 2009" version
+; far-string). Any file whose inflated size >= WSIZE (32768) triggered it; STORED
+; (shallow flush) was unaffected. Default is now 2 KB; override with
+; -DWC_STACK_BYTES=<n> at assembly time (build-lib.sh honors WC_STACK_BYTES).
+ifndef WC_STACK_BYTES
+WC_STACK_BYTES equ 2048
+endif
 STACK   segment word public 'STACK'
-        db      512 dup(0)
+        db      WC_STACK_BYTES dup(0)
 stktop  label   word
 STACK   ends
         end     _cstart_

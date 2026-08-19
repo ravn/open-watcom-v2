@@ -225,7 +225,7 @@ echo "==> Layer 1: long mul/div helpers (%ld, lseek arithmetic)"
 echo "==> Layer 2: CP/M-86 seam (BDOS) + closure stubs + port seams"
 "$WCC" $USER $INC "$SRC/port/cominit.c"  -fo=cominit.obj
 "$WCC" $USER $INC "$SRC/port/diskio.c"   -fo=diskio.obj      # FCB BDOS file I/O
-"$WCC" $USER $INC "$SRC/port/lowlevel.c" -fo=lowlevel.obj
+"$WCC" $USER $INC ${WC_ARENA_BYTES:+-dWC_ARENA_BYTES=$WC_ARENA_BYTES} "$SRC/port/lowlevel.c" -fo=lowlevel.obj
 "$WCC" $USER $INC "$SRC/port/farheap.c"  -fo=farheap.obj     # Stage A far heap __AllocSeg/__GrowSeg
 "$WCC" $USER $INC "$SRC/port/errnoptr.c" -fo=errnoptr.obj
 "$WCC" $USER $INC "$SRC/port/abortcpm.c" -fo=abortcpm.obj
@@ -236,7 +236,7 @@ echo "==> Layer 2: CP/M-86 seam (BDOS) + closure stubs + port seams"
 "$WCC" $USER $INC -DDISKIO_LSEEK "$SRC/port/stubs.c" -fo=stubs.obj
 
 echo "==> startup (archived as a library member AND emitted as a standalone obj)"
-"$WASM" -m$MODEL -0 "$SRC/port/$CRT0SRC" -fo=crt0.obj
+"$WASM" -m$MODEL -0 ${WC_STACK_BYTES:+-DWC_STACK_BYTES=$WC_STACK_BYTES} "$SRC/port/$CRT0SRC" -fo=crt0.obj
 
 echo "==> archive clibcpm.lib"
 rm -f clibcpm.lib

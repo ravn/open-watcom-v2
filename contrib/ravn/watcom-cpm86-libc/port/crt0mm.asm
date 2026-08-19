@@ -122,8 +122,14 @@ __argv  label   word                    ; keep the public symbol some objs EXTRN
 _argvtab dw     33 dup(0)               ; argv[]: 32 slots + NULL terminator
 _DATA   ends
 
+; Stack size: 512 B overflows deep call chains (see crt0sm.asm for the UnZip
+; DEFLATE >=32 KB flush corruption this caused). Default 2 KB; override with
+; -DWC_STACK_BYTES=<n> (build-lib.sh honors WC_STACK_BYTES).
+ifndef WC_STACK_BYTES
+WC_STACK_BYTES equ 2048
+endif
 STACK   segment word public 'STACK'
-        db      512 dup(0)
+        db      WC_STACK_BYTES dup(0)
 stktop  label   word
 STACK   ends
         end     _cstart_
