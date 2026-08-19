@@ -48,6 +48,7 @@
 
 #include <string.h>
 #include "linkstd.h"
+#include "alloc.h"
 #include "loadfile.h"
 #include "dbgall.h"
 #include "loadcpm86.h"
@@ -74,6 +75,161 @@ static unsigned_8 *putU16( unsigned_8 *p, unsigned_16 val )
     *p++ = (unsigned_8)val;
     *p++ = (unsigned_8)( val >> 8 );
     return( p );
+}
+
+/****************************************************************************
+ * Stage B (medium / big model) load-time relocation.
+ *
+ * A cross-group FAR reference (e.g. `jmp far ptr callee_` between two
+ * `<func>_TEXT` segments under `-mm -zm`) needs the loader to fill in the
+ * real segment at load time, because a relocatable `.CMD` has base=0 in every
+ * group descriptor -- the loader, not the linker, picks each group's load
+ * paragraph.  We replicate DR C / LINK-86's mechanism: write a GROUP-RELATIVE
+ * paragraph into the far-segment word (target's offset within its own group
+ * image) and emit a 4-byte P_LOAD fixup record telling the loader to add that
+ * group's runtime load segment.  See reference_drc_cpm86_reloc_format.md.
+ *
+ * Worked example (the forced-split repro `main_` far-jmps to `callee_`):
+ *   wlink lays out main__TEXT @ 0002:0 (image para 0), callee__TEXT @ 0003:0
+ *   (image para 1), CODE base = 0002.  main_'s `EA off16 seg16` has its seg
+ *   word at code offset 6.  We write the word = 0003-0002 = 1 (callee's
+ *   group-relative paragraph) and a record { grp=0x11, para=0, offs=6 }:
+ *   location in CODE (hi nibble 1), add CODE base (lo nibble 1).  At load the
+ *   loader does word += code_load_seg, resolving the far jump.
+ ****************************************************************************/
+
+typedef struct cpm86_fixup {
+    struct cpm86_fixup  *next;
+    segment             loc_seg;    /* frame paragraph of the word to patch  */
+    offset              loc_off;    /* byte offset of the word in that frame  */
+    segment             tgt_seg;    /* frame paragraph the word points at     */
+} cpm86_fixup;
+
+static cpm86_fixup      *CPM86Fixups;    /* captured cross-group far seg refs  */
+
+void ResetCPM86Fixups( void )
+/***************************/
+{
+    CPM86Fixups = NULL;
+}
+
+static bool cpm86GroupIsCode( group_entry *group )
+/************************************************/
+{
+    return( group != NULL && (group->leaders->class->flags & CLASS_CODE) != 0 );
+}
+
+static offset cpm86GroupImgPara( group_entry *target )
+/*****************************************************
+ * Paragraph offset of `target`'s stored image within its CP/M-86 group
+ * descriptor (the coalesced CODE descriptor, or the DATA descriptor),
+ * i.e. the value the loader must add its runtime load segment to.
+ *
+ * This MUST mirror exactly how FiniCPM86LoadFile() lays the images out: it
+ * walks the (already OrderGroups-sorted) Groups list, skips empty groups,
+ * writes each non-empty group's image PARAGRAPH-PADDED, code-class groups
+ * first into one descriptor and the rest into their own -- so a group's image
+ * paragraph offset is the running sum of CMD_PARAS(CalcGroupSize()) over the
+ * preceding non-empty groups of the SAME class category.
+ *
+ * NB: wlink's own frame numbers (group->grp_addr.seg) are NOT this value --
+ * for `-mm -zm` they increment by 1 per segment regardless of size, so a
+ * 54-byte cpmmain_TEXT (4 paragraphs) is followed by add7_TEXT at frame+1 yet
+ * its image sits 4 paragraphs later.  Deriving the paragraph from grp_addr.seg
+ * (the original approach) mislocated every multi-paragraph function's far
+ * target; walking the layout is the authoritative source. */
+{
+    group_entry     *group;
+    offset          para = 0;
+    bool            want_code;
+
+    if( target == NULL )
+        return( 0 );
+    want_code = cpm86GroupIsCode( target );
+    for( group = Groups; group != NULL; group = group->next ) {
+        if( group == target )
+            break;
+        if( CalcGroupSize( group ) == 0 )
+            continue;
+        if( cpm86GroupIsCode( group ) != want_code )
+            continue;
+        para += CMD_PARAS( CalcGroupSize( group ) );
+    }
+    return( para );
+}
+
+segment CPM86GroupRelPara( segment seg )
+/***************************************
+ * value to store in a far-segment word: the target paragraph's offset within
+ * its own group descriptor image (the loader then adds the runtime load base)
+ */
+{
+    return( (segment)cpm86GroupImgPara( FindGroup( seg ) ) );
+}
+
+void AddCPM86Fixup( segment loc_seg, offset loc_off, segment tgt_seg )
+/********************************************************************/
+{
+    cpm86_fixup     *fix;
+
+    fix = _PermAlloc( sizeof( *fix ) );
+    fix->next = CPM86Fixups;
+    fix->loc_seg = loc_seg;
+    fix->loc_off = loc_off;
+    fix->tgt_seg = tgt_seg;
+    CPM86Fixups = fix;
+}
+
+static void cpm86WriteFixups( unsigned_8 *header )
+/*************************************************
+ * Emit the P_LOAD fixup table (if any cross-group far refs were captured):
+ * a packed array of 4-byte records at a 128-byte record boundary, terminated
+ * by an all-zero record, then set header byte 127 (ch_lbyte) bit 7 and header
+ * word 0x7D (ch_fixrec) to the table's start record.  Must run BEFORE
+ * DBIWrite() so the record number named by ch_fixrec is stable.
+ */
+{
+    cpm86_fixup     *fix;
+    unsigned long   table_pos;
+    unsigned_16     fixrec;
+    unsigned_8      rec[4];
+
+    if( CPM86Fixups == NULL )
+        return;
+    table_pos = NullAlign( CMD_REC_SIZE );
+    fixrec = (unsigned_16)( table_pos / CMD_REC_SIZE );
+    for( fix = CPM86Fixups; fix != NULL; fix = fix->next ) {
+        group_entry     *loc_grp;
+        group_entry     *tgt_grp;
+        bool            loc_code;
+        bool            tgt_code;
+        unsigned long   loc_flat;
+        unsigned_16     para;
+
+        loc_grp = FindGroup( fix->loc_seg );
+        tgt_grp = FindGroup( fix->tgt_seg );
+        loc_code = cpm86GroupIsCode( loc_grp );
+        tgt_code = cpm86GroupIsCode( tgt_grp );
+        /* byte offset of the far-segment word within its descriptor image:
+         * (location group's image paragraph) * 16 + its offset in the group.
+         * The loader reads para (>>4) and offs (&15) and computes the address
+         * as (loc_group_load_seg + para)*16 + offs. */
+        loc_flat = (unsigned long)cpm86GroupImgPara( loc_grp ) * CMD_PARA_SIZE + fix->loc_off;
+        para = (unsigned_16)( loc_flat >> 4 );
+        /* hi nibble = LOCATION group type, lo nibble = TARGET group type */
+        rec[0] = (unsigned_8)( ( ( loc_code ? CMD_TYPE_CODE : CMD_TYPE_DATA ) << 4 )
+                             | ( tgt_code ? CMD_TYPE_CODE : CMD_TYPE_DATA ) );
+        rec[1] = (unsigned_8)para;
+        rec[2] = (unsigned_8)( para >> 8 );
+        rec[3] = (unsigned_8)( loc_flat & 0x0F );
+        WriteLoad( rec, sizeof( rec ) );
+    }
+    memset( rec, 0, sizeof( rec ) );        /* terminating all-zero record */
+    WriteLoad( rec, sizeof( rec ) );
+    NullAlign( CMD_REC_SIZE );              /* pad the table to a full record */
+    header[0x7D] = (unsigned_8)fixrec;      /* ch_fixrec (LE word)            */
+    header[0x7E] = (unsigned_8)( fixrec >> 8 );
+    header[0x7F] |= 0x80;                   /* ch_lbyte bit 7 = fixups present */
 }
 
 void FiniCPM86LoadFile( void )
@@ -207,25 +363,27 @@ void FiniCPM86LoadFile( void )
         ndesc++;
     }
 
-    /* Append any debug info AFTER the group images.  This is safe ONLY while
-     * header byte 127 (ch_lbyte) bit 7 is clear, i.e. Phase 1 (no fixups):
-     * with bit 7 clear the genuine CP/M-86 loader never reads past the images.
-     * But byte 127 bit 7 = "fixup records present" and header word 0x7D
-     * (ch_fixrec) names a trailing file RECORD the loader DOES read and apply
-     * (verified in Concurrent CP/M-86 2.0 source kern/cmdh.def + kern/load.sup;
-     * see reference_cpm86_cmd_header_ccpm_source.md).  So once Stage B sets
-     * bit 7, the fixup table must sit at exactly the ch_fixrec record and debug
-     * info must go AFTER it without shifting that record number.
-     * Stage B model (LOCKED 2026-08-19): PURE loader-relocation -- emit the
-     * fixup table + bit 7 + ch_fixrec, NO crt0 self-reloc, and NO type-8 AUX4
-     * copy of the reloc table.  (DR C ships a guard-coordinated dual path AND
-     * an AUX4 duplicate so it also runs on emu2; we take ONLY the loader half.
-     * @ravn 2026-08-19: emu2 not applying P_LOAD fixups is an emu2 BUG to fix
-     * later, tracked ravn/emu2-cpm86#1 -- not worked around with AUX4 here;
-     * medium-model .CMDs verify on real CP/M-86 (MAME) per ravn/rc7xx-work#15.
-     * See reference_drc_cpm86_reloc_mechanism_VERIFIED.md.)
-     * Must happen before we seek back to write the header, else it would
-     * overwrite the images at offset 128. */
+    /* Stage B: emit the P_LOAD fixup table for cross-group far segment refs
+     * captured during the relocation walk (empty in small/8080 model, so this
+     * is a no-op there and the output stays byte-identical to phase 1).  This
+     * sets header byte 127 (ch_lbyte) bit 7 + header word 0x7D (ch_fixrec).
+     * Stage B model (LOCKED 2026-08-19): PURE loader-relocation -- fixup table
+     * + bit 7 + ch_fixrec, NO crt0 self-reloc and NO type-8 AUX4 copy of the
+     * table.  (DR C ships a guard-coordinated dual path AND an AUX4 duplicate
+     * so it also runs on emu2; we take ONLY the loader half.  @ravn 2026-08-19:
+     * emu2 not applying P_LOAD fixups is an emu2 BUG to fix later, tracked
+     * ravn/emu2-cpm86#1 -- not worked around with AUX4 here; medium-model
+     * .CMDs verify on real CP/M-86 (MAME) and the Unicorn runner per
+     * ravn/rc7xx-work#15.  See reference_drc_cpm86_reloc_mechanism_VERIFIED.md
+     * and reference_drc_cpm86_reloc_format.md.) */
+    cpm86WriteFixups( header );
+
+    /* Append any debug info AFTER the group images (and after the fixup table
+     * above).  The genuine CP/M-86 loader reads the fixup records named by
+     * ch_fixrec and stops at the first all-zero record, so trailing debug info
+     * is invisible to it; with bit 7 clear (small model) it never reads past
+     * the images at all.  Must happen before we seek back to write the header,
+     * else it would overwrite the images at offset 128. */
     DBIWrite();
 
     CurrSect = Root;

@@ -35,6 +35,7 @@
 #include "cmdall.h"
 #include "cmdline.h"
 #include "cmdcpm86.h"
+#include "loadcpm86.h"
 
 
 #ifdef _CPM86
@@ -43,10 +44,14 @@ offset  CPM86FarHeapSize = 0;
 
 void SetCPM86Fmt( void )
 /***********************
- * nothing format-specific to initialise for phase 1 (small / 8080 model,
- * base=0, no fixups).
- */
+ * Small / 8080 model (base=0, no fixups) needs no format-specific state.
+ * Enable relocation collection so the generic relocation walk hands us
+ * cross-group far SEGMENT references (Stage B medium/big model): with no
+ * such references (small model) the captured list stays empty and the
+ * output is byte-identical to phase 1 (header 0x7F bit 7 stays clear). */
 {
+    ResetCPM86Fixups();
+    LinkState |= LS_MAKE_RELOCS;
 }
 
 void FreeCPM86Fmt( void )
