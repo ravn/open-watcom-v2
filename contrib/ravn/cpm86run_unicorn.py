@@ -396,9 +396,16 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False,
     # Deterministic virtual clock: count code bytes executed (per basic block,
     # so the overhead is far lower than a per-instruction hook).  T_GET and the
     # XIOS 16 ms tick (Int 28h fn 19) turn this into emulated time via CLOCK_HZ.
-    def hook_block(uc, address, size, user_data):
-        state["ticks"] += size
-    uc.hook_add(UC_HOOK_BLOCK, hook_block)
+    #
+    # FULL-SPEED RULE (2026-08-19, @ravn): a plain output run() must execute at
+    # native Unicorn speed with NO per-block Python callback.  The virtual clock
+    # is only meaningful when we are already paying per-instruction decode cost
+    # to count insns/cycles, so we install the block hook ONLY in a counting run.
+    # A plain run() therefore has just the (infrequent) INT hook for BDOS.
+    if count_insns or count_cycles:
+        def hook_block(uc, address, size, user_data):
+            state["ticks"] += size
+        uc.hook_add(UC_HOOK_BLOCK, hook_block)
 
     insns = {"n": 0}
     if count_insns and not count_cycles:
