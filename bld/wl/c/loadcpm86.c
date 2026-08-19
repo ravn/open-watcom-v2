@@ -96,10 +96,62 @@ void FiniCPM86LoadFile( void )
 
     desc = header;
     ndesc = 0;
+
+    /* Coalesce ALL CLASS_CODE groups into ONE type-1 CODE group descriptor
+     * (Stage B step 1).  The medium model (`-mm -zm`) emits one `<func>_TEXT`
+     * CODE group per function; a genuine CP/M-86 .CMD may hold at most eight
+     * groups and expects a SINGLE type-1 CODE group whose far references are
+     * resolved by loader fixups, not one type-1 descriptor per source segment
+     * (which is what the old per-group loop wrote, overflowing CMD_MAX_GROUPS
+     * and giving each func its own load base).  We write every code group's
+     * image contiguously, paragraph-packed, and sum their paragraph lengths
+     * into one descriptor.  In the small/8080 models there is exactly one
+     * CLASS_CODE group, so this is byte-identical to the old output.
+     *
+     * OrderGroups(CompareDosSegments) has already placed all CODE-class groups
+     * ahead of DATA, so writing code in this first pass and data in the second
+     * keeps the file image code-first / data-second regardless. */
+    {
+        offset          code_img_paras = 0;     /* stored image, paragraphs */
+        offset          code_alloc_paras = 0;   /* min==max alloc, paras    */
+        bool            have_code = false;
+
+        for( group = Groups; group != NULL; group = group->next ) {
+            if( CalcGroupSize( group ) == 0 )
+                continue;
+            if( ( group->leaders->class->flags & CLASS_CODE ) == 0 )
+                continue;
+            CurrSect = group->section;
+            img_len = WriteGroupLoad( group, false );   /* stored image bytes */
+            /* Pad each code group's stored image to a PARAGRAPH (16-byte)
+             * boundary so the concatenated code image stays paragraph-aligned
+             * and the summed paragraph length matches the bytes on disk. */
+            pad = (size_t)( -(long)img_len & ( CMD_PARA_SIZE - 1 ) );
+            if( pad != 0 )
+                PadLoad( pad );
+            code_img_paras += CMD_PARAS( img_len );
+            code_alloc_paras += CMD_PARAS( CalcGroupSize( group ) );
+            have_code = true;
+        }
+        if( have_code ) {
+            *desc++ = CMD_TYPE_CODE;
+            desc = putU16( desc, (unsigned_16)code_img_paras );    /* length */
+            desc = putU16( desc, 0 );                              /* base   */
+            desc = putU16( desc, (unsigned_16)code_alloc_paras );  /* min    */
+            desc = putU16( desc, (unsigned_16)code_alloc_paras );  /* max    */
+            ndesc++;
+        }
+    }
+
+    /* Now the non-CODE groups (DATA, and any others): one descriptor each,
+     * written after the coalesced code image so the loader reads code then
+     * data contiguously. */
     for( group = Groups; group != NULL; group = group->next ) {
         if( ndesc >= CMD_MAX_GROUPS )
             break;
         if( CalcGroupSize( group ) == 0 )
+            continue;
+        if( group->leaders->class->flags & CLASS_CODE )
             continue;
         CurrSect = group->section;
         img_len = WriteGroupLoad( group, false );   /* stored image bytes */
@@ -113,8 +165,7 @@ void FiniCPM86LoadFile( void )
         pad = (size_t)( -(long)img_len & ( CMD_PARA_SIZE - 1 ) );
         if( pad != 0 )
             PadLoad( pad );
-        *desc++ = ( group->leaders->class->flags & CLASS_CODE ) ?
-                    CMD_TYPE_CODE : CMD_TYPE_DATA;
+        *desc++ = CMD_TYPE_DATA;
         desc = putU16( desc, CMD_PARAS( img_len ) );            /* length */
         desc = putU16( desc, 0 );                               /* base   */
         desc = putU16( desc, CMD_PARAS( CalcGroupSize( group ) ) ); /* min */
@@ -166,11 +217,13 @@ void FiniCPM86LoadFile( void )
      * bit 7, the fixup table must sit at exactly the ch_fixrec record and debug
      * info must go AFTER it without shifting that record number.
      * Stage B model (LOCKED 2026-08-19): PURE loader-relocation -- emit the
-     * fixup table + bit 7 + ch_fixrec, NO crt0 self-reloc.  (DR C ships a
-     * guard-coordinated dual path; we take only the loader half.  emu2 needs
-     * P_LOAD reloc for this, tracked ravn/emu2-cpm86#1; oracle-verify on real
-     * CP/M-86 per ravn/rc7xx-work#15.  See
-     * reference_drc_cpm86_reloc_mechanism_VERIFIED.md.)
+     * fixup table + bit 7 + ch_fixrec, NO crt0 self-reloc, and NO type-8 AUX4
+     * copy of the reloc table.  (DR C ships a guard-coordinated dual path AND
+     * an AUX4 duplicate so it also runs on emu2; we take ONLY the loader half.
+     * @ravn 2026-08-19: emu2 not applying P_LOAD fixups is an emu2 BUG to fix
+     * later, tracked ravn/emu2-cpm86#1 -- not worked around with AUX4 here;
+     * medium-model .CMDs verify on real CP/M-86 (MAME) per ravn/rc7xx-work#15.
+     * See reference_drc_cpm86_reloc_mechanism_VERIFIED.md.)
      * Must happen before we seek back to write the header, else it would
      * overwrite the images at offset 128. */
     DBIWrite();
