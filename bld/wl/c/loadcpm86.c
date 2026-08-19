@@ -165,6 +165,12 @@ void FiniCPM86LoadFile( void )
      * see reference_cpm86_cmd_header_ccpm_source.md).  So once Stage B sets
      * bit 7, the fixup table must sit at exactly the ch_fixrec record and debug
      * info must go AFTER it without shifting that record number.
+     * Stage B model (LOCKED 2026-08-19): PURE loader-relocation -- emit the
+     * fixup table + bit 7 + ch_fixrec, NO crt0 self-reloc.  (DR C ships a
+     * guard-coordinated dual path; we take only the loader half.  emu2 needs
+     * P_LOAD reloc for this, tracked ravn/emu2-cpm86#1; oracle-verify on real
+     * CP/M-86 per ravn/rc7xx-work#15.  See
+     * reference_drc_cpm86_reloc_mechanism_VERIFIED.md.)
      * Must happen before we seek back to write the header, else it would
      * overwrite the images at offset 128. */
     DBIWrite();
