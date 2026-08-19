@@ -156,9 +156,17 @@ void FiniCPM86LoadFile( void )
         ndesc++;
     }
 
-    /* Append any debug info AFTER the group images (the CMD loader ignores
-     * trailing bytes) -- must happen before we seek back to write the header,
-     * else it would overwrite the images at offset 128. */
+    /* Append any debug info AFTER the group images.  This is safe ONLY while
+     * header byte 127 (ch_lbyte) bit 7 is clear, i.e. Phase 1 (no fixups):
+     * with bit 7 clear the genuine CP/M-86 loader never reads past the images.
+     * But byte 127 bit 7 = "fixup records present" and header word 0x7D
+     * (ch_fixrec) names a trailing file RECORD the loader DOES read and apply
+     * (verified in Concurrent CP/M-86 2.0 source kern/cmdh.def + kern/load.sup;
+     * see reference_cpm86_cmd_header_ccpm_source.md).  So once Stage B sets
+     * bit 7, the fixup table must sit at exactly the ch_fixrec record and debug
+     * info must go AFTER it without shifting that record number.
+     * Must happen before we seek back to write the header, else it would
+     * overwrite the images at offset 128. */
     DBIWrite();
 
     CurrSect = Root;
