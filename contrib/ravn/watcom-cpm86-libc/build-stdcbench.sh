@@ -1,4 +1,14 @@
 #!/bin/bash
+# ============================================================================
+# PARKED (owcc migration, 2026): NOT yet rewritten to owcc -bcpm86.
+# This script still uses the hand-assembled seam + wlink build path (crt0sm,
+# stdioshim, lowlevel, stubs, scbport -- all custom port seams), which the
+# owcc-standard/no-seams decision retires. Unlike Dhrystone + Mandelbrot
+# (already on owcc, see ../bench.sh / ../bench-mandel.sh), stdcbench has NO
+# baseline.json oracle and previously scored via emu2 (not built here), so a
+# faithful owcc rewrite needs a port + deterministic-scoring decision first.
+# User: "gem stdcbench for nu" -- left as-is until that is resolved.
+# ============================================================================
 # build-stdcbench.sh -- the wc-stdcbench milestone (rc7xx-work#6 milestone 4).
 #
 # Rebuild the SUBSTANTIAL multi-module benchmark stdcbench 0.8 (integer suite:
