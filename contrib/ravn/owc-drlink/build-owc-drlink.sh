@@ -3,10 +3,10 @@
 # build-owc-drlink.sh - build a CP/M-86 .CMD from Open Watcom C by linking the
 # Watcom OMF output with Digital Research's native CP/M-86 linker (LINK86).
 #
-# Unlike contrib/ravn/build-cpm86.sh (which links to a flat raw binary with wl
-# and wraps it with bin2cmd.py), this path proves that Open Watcom's OMF object
-# output is directly consumable by a *real CP/M-86 linker*. DR LINK86 reads the
-# Watcom .obj files and emits a proper .CMD with correct group descriptors.
+# Unlike wl's own `format cpm86` output (the native route in this tree), this
+# path proves that Open Watcom's OMF object output is directly consumable by a
+# *real CP/M-86 linker*. DR LINK86 reads the Watcom .obj files and emits a
+# proper .CMD with correct group descriptors.
 #
 # KEY FACTS (verified, see README.md):
 #   * Open Watcom emits Intel/MS OMF; DR LINK-86 v1.4 (1984) accepts it as-is.

@@ -4,9 +4,9 @@
 > Open Watcom carries patches that add a **native `format cpm86` output format
 > to the linker** (`wl`), and a hand-built CP/M-86 C-runtime seam layer lives in
 > `watcom-cpm86-libc/`. Do **not** assume CP/M-86 is unsupported — it is built
-> and passes tests. The historical "workaround" sections below (raw binary +
-> `bin2cmd.py`) are the *older* freestanding-no-runtime route, kept because it is
-> still handy for tiny programs; the native linker format is the primary path.
+> and passes tests. `owcc -bcpm86` / `wl format cpm86` emit `.CMD` files
+> directly; the former manual raw-image + `bin2cmd.py` wrapping route has been
+> **retired** (2026-08-19) now that the linker is authoritative.
 
 ## CP/M-86 vs MS-DOS — same 8086 core, different runtime + exe format
 
@@ -84,42 +84,29 @@ The remaining task for a *standard* C program is the CP/M-86 **C runtime**
 in `watcom-cpm86-libc/port/` and linked alongside Watcom's own (unchanged) clib
 objects. See `watcom-cpm86-libc/README.md`.
 
-## Alternative: freestanding via raw binary + `bin2cmd.py` (older route)
+## Retired: freestanding raw binary + `bin2cmd.py` (removed 2026-08-19)
 
 Before the native `format cpm86` patch, CP/M-86 `.CMD`s were produced by
 emitting a flat `format raw` image and wrapping it in a 128-byte `.CMD` header
-with `bin2cmd.py`. This still works and is the simplest route for a tiny
-freestanding program that makes its own BDOS calls and needs no C runtime:
+with a hand-written `bin2cmd.py`, driven by `build-cpm86.sh`. Both files have
+been **removed** now that `owcc -bcpm86` / `wl format cpm86` emit `.CMD`
+directly — the linker is the single source of truth for the header, so there is
+no longer a second (hand-rolled) header writer to keep in sync.
 
-```
-wcc  -0 -mt -s -oi hello.c            # 16-bit x86, tiny model, no runtime
-wl   format raw bin option start=_start_ name hello.bin file hello.obj
-python3 bin2cmd.py hello.bin HELLO.CMD
-```
+The freestanding example sources (`hello.asm`, `hello.c`, `echoarg.asm`,
+`dhry.c`, `bigdata.c`, `cpmstart.asm`) and their prebuilt `.CMD` artifacts are
+kept as runnable references for the raw-BDOS (`INT 0E0h`) technique; rebuild
+them with the native linker path (`owcc -bcpm86 …` or `wl format cpm86 …`).
 
-`build-cpm86.sh` accepts a `CPU` variable to select the instruction level
-(`-<n>`): `CPU=0` = 8086 (default), `CPU=1` = 80186, `CPU=2` = 80286, etc.
-Only the instruction set matters here -- CP/M-86 is real-mode and the result is
-run at instruction level (Unicorn/QEMU executes 80186+ opcodes fine); the
-80186's on-chip peripherals are out of scope.
-
-### The `.CMD` header (`bin2cmd.py`)
+### The `.CMD` header
 
 CP/M-86 executables start with a 128-byte **Command File Header**: eight 9-byte
 group descriptors (`type, length, base, min, max`, little-endian, in 16-byte
 paragraphs), followed by RSX/fixup/flags fields. Verified against Digital
 Research's *CP/M-86 System Guide* (Command File Format appendix) and the
-seasip.info archive.
-
-`bin2cmd.py` supports two models:
-
-- `--model 8080` (default): one Code group holding code+data — mirrors a
-  CP/M-80 `.COM` layout; pair with `wcc -mt` (tiny).
-- `--model small`: separate Code (type 1) and Data (type 2) groups — pair with
-  `wcc -ms` and supply the data image via `--data`.
-
-The header layout and both models are covered by the self-tests (run
-`python3 bin2cmd.py --help`; the test block is in the session notes).
+seasip.info archive. The linker's writer lives in `bld/wl/c/loadcpm86.c`
+(+ `cmdcpm86.c`); the Unicorn runner (`cpm86run_unicorn.py`) carries a small
+read-only `parse_header()` to inspect the descriptors when loading.
 
 ### The system-call layer (`hello.asm` / `hello.c`)
 
@@ -170,10 +157,9 @@ python3 cpm86run_unicorn.py ECHOARG.CMD one two.dat   ->   " ONE TWO.DAT"
 ### Ready-to-run artifact: `HELLO.CMD`
 
 `HELLO.CMD` in this folder is a **complete, runnable** CP/M-86 executable. It is
-now produced by the real Open Watcom toolchain (`build-cpm86.sh hello.asm`:
-`wasm` → `wl format raw` → `bin2cmd.py`); the resulting file is byte-identical
-to the earlier hand-assembled reference, which validates both the pipeline and
-the hand analysis. Code layout (after the base page):
+byte-identical to the earlier hand-assembled reference, which validated the hand
+analysis of the header format. Rebuild it via the native linker path
+(`owcc -bcpm86` / `wl format cpm86`). Code layout (after the base page):
 
 ```
 0100: 0e 1f ba 0d 01 b1 09 cd e0       ; push cs; pop ds; mov dx,msg; mov cl,9; int E0h
@@ -414,7 +400,6 @@ emulator demo, not a portable CP/M-86 program.
 
 | File | Purpose |
 |------|---------|
-| `bin2cmd.py` | raw 8086 image → CP/M-86 `.CMD` (8080 + small models, base page reserved), with tests |
 | `ccp.py` | emulate the CCP: parse the command line into FCBs + command tail and build the base page |
 | `hello.asm` | basic freestanding CP/M-86 hello-world (wasm, org 100h), raw BDOS (`INT 0E0h`) |
 | `hello.c` | same program in C via `#pragma aux`; entry `cpmmain()` |
@@ -422,11 +407,10 @@ emulator demo, not a portable CP/M-86 program.
 | `dhry.c` | freestanding CP/M-86 port of the Dhrystone 2.1 benchmark (non-trivial C demo) |
 | `bigdata.c` | large program using `__far` pointers to build and checksum a >64 KB (192 KB) data structure |
 | `cpmstart.asm` | minimal C startup stub (linked first) — calls `cpmmain()`, then BDOS terminate |
-| `HELLO.CMD` | ready-to-run executable (built by `build-cpm86.sh hello.asm`; byte-identical to the earlier hand-assembled reference) |
+| `HELLO.CMD` | ready-to-run executable (prebuilt reference; byte-identical to the hand-assembled original) |
 | `ECHOARG.CMD` | ready-to-run command-tail demo |
-| `DHRY.CMD` | ready-to-run Dhrystone 2.1 benchmark (built by `build-cpm86.sh dhry.c`) |
-| `BIGDATA.CMD` | ready-to-run >64 KB data-structure checksum demo (built by `build-cpm86.sh bigdata.c`) |
-| `build-cpm86.sh` | the wasm/wcc → wl → bin2cmd pipeline (`CPU=` selects 8086/80186/…) |
+| `DHRY.CMD` | ready-to-run Dhrystone 2.1 benchmark (prebuilt reference) |
+| `BIGDATA.CMD` | ready-to-run >64 KB data-structure checksum demo (prebuilt reference) |
 | `mkdisk-cpm86.sh` | pack the `.CMD` files into a CP/M-86 disk image (cpmtools) for full-machine emulators |
 | `cpm86run.py` | minimal hand-written 8086 interpreter + BDOS |
 | `cpm86run_unicorn.py` | independent Unicorn/QEMU runner + BDOS console group (`--count`, `--ticks`) |

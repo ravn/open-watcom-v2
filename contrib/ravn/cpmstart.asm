@@ -32,11 +32,10 @@
 ;   stack slot) while passing under a too-forgiving emu2; fixed once emu2 was
 ;   also corrected to hand out a genuinely separate entry-time stack segment.
 ;
-;   Link (see build-cpm86.sh, C path):
+;   Link (native CP/M-86 route):
 ;       wasm cpmstart.asm ; wcc ... prog.c
-;       wl format raw bin option quiet, offset=0x100 &
-;          name prog.bin file cpmstart.obj file prog.obj
-;       python3 bin2cmd.py prog.bin PROG.CMD      (reserves the 100H base page)
+;       wl format cpm86 name PROG.CMD file cpmstart.obj file prog.obj
+;       (the former raw+bin2cmd.py wrapping route was retired)
 ;
 ;****************************************************************************
         .8086

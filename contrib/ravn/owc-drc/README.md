@@ -197,7 +197,7 @@ DR C run-time (`clears.l86`), not the few hundred bytes of kernel code.
 
 Open Watcom emits Intel/Microsoft **OMF**, which DR `LINK-86` consumes directly —
 including the DR C library `clears.l86` (an OMF `.L86` library searched with the
-`[S]` attribute). No format conversion, no `bin2cmd.py` post-processing.
+`[S]` attribute). No format conversion, no header post-processing tool.
 
 ### 2. Symbol naming: DR C has NO leading underscore
 

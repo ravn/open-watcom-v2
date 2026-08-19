@@ -37,8 +37,35 @@ from unicorn.x86_const import (
     UC_X86_REG_AX, UC_X86_REG_BX,
 )
 
-import bin2cmd
 import ccp
+
+# CP/M-86 .CMD group-descriptor types (System Guide, CMD-header appendix;
+# cross-checked with seasip.info/Cpm/cmdfile.html). Only CODE/DATA are named
+# here; the loader below keeps all other group types (3..8) generically.
+G_CODE = 0x01
+G_DATA = 0x02
+
+
+def parse_header(data):
+    """Parse the 8x9-byte group descriptors of a CP/M-86 .CMD header.
+
+    Each descriptor is type(1) + length(2) + base(2) + min(2) + max(2), all
+    little-endian, lengths/bases in 16-byte paragraphs. Stops at the first
+    zero-type slot. Returns a list of (gtype, length, base, minp, maxp) tuples.
+    """
+    groups = []
+    for i in range(8):
+        off = i * 9
+        gtype = data[off]
+        if gtype == 0:
+            break
+        length = data[off + 1] | (data[off + 2] << 8)
+        base = data[off + 3] | (data[off + 4] << 8)
+        minp = data[off + 5] | (data[off + 6] << 8)
+        maxp = data[off + 7] | (data[off + 8] << 8)
+        groups.append((gtype, length, base, minp, maxp))
+    return groups
+
 
 LOAD_SEG = 0x1000      # paragraph where the first (code) group is placed
 CCP_SEG = 0x0800       # emulated CCP area: stack + a return stub below the program
@@ -100,9 +127,9 @@ class BdosUnimplemented(Exception):
 
 def _detect_model(groups):
     types = [g[0] for g in groups]
-    if types == [bin2cmd.G_CODE]:
+    if types == [G_CODE]:
         return "8080"
-    if sorted(types) == [bin2cmd.G_CODE, bin2cmd.G_DATA]:
+    if sorted(types) == [G_CODE, G_DATA]:
         return "small"
     return "compact"
 
@@ -112,7 +139,7 @@ def _load(uc, data, cmdline):
     CCP. Returns (cs, ip). Raises ValueError on a malformed file."""
     if len(data) < 128 or not (1 <= data[0] <= 9):
         raise ValueError("not a CP/M-86 .CMD file")
-    groups = bin2cmd.parse_header(data)
+    groups = parse_header(data)
     if not groups:
         raise ValueError(".CMD header has no group descriptors")
     model = _detect_model(groups)
@@ -133,8 +160,8 @@ def _load(uc, data, cmdline):
         all_groups.append((gtype, length, minp, maxp, img))
         off += nbytes
 
-    code_img = images.get(bin2cmd.G_CODE, b"")
-    data_img = images.get(bin2cmd.G_DATA, b"")
+    code_img = images.get(G_CODE, b"")
+    data_img = images.get(G_DATA, b"")
     code_len = len(code_img)
 
     code_seg = LOAD_SEG
@@ -161,7 +188,7 @@ def _load(uc, data, cmdline):
         # (extra/stack/aux) groups.
         img_paras = (len(data_img) + 15) // 16
         data_desc = next((g for g in groups
-                          if g[0] == bin2cmd.G_DATA), None)
+                          if g[0] == G_DATA), None)
         alloc_paras = 0x1000                      # 64K
         if data_desc is not None:
             _, _, _, dminp, dmaxp = data_desc
