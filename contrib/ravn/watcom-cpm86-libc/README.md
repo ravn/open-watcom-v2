@@ -4,6 +4,11 @@ Tracking issue: **ravn/rc7xx-work#6**.
 For the porting *story* (the pivot, milestones, and verification method) see
 [`PORTING.md`](PORTING.md); for remaining gaps see [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).
 
+**All three memory models** (small/medium/compact) are built and gated by one
+command — `bash run-all-models.sh` (6 tests × 3 models, all green). See
+[`docs/BUILDING_ALL_MODELS.md`](docs/BUILDING_ALL_MODELS.md) for the build/test
+process and [`docs/FLOAT_PRINTF.md`](docs/FLOAT_PRINTF.md) for opt-in `%e/%f/%g`.
+
 **Status:** foundation **proven end-to-end** (run-verified under emu2). This
 directory demonstrates that Open Watcom's *own* clib can be retargeted to
 CP/M-86 (Intel 8086/80186, e.g. RC759) by supplying only a **thin BDOS

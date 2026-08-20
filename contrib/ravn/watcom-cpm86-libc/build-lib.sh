@@ -263,6 +263,22 @@ AINC="-i=$B/watcom/h -i=$B/comp_cfg/h"
 "$WCC" $USER -fpc -i=$B/mathlib/h $INC "$SRC/port/fesoft.c"           -fo=fesoft.obj    # soft feraiseexcept (no 8087)
 "$WCC" $USER -fpc -i=$B/mathlib/h $INC "$B/clib/math/c/hugeval.c"      -fo=hugeval.obj   # __HugeValue (HUGE_VAL)
 
+# Real %e/%f/%g printf formatting -- OPT-IN. The default noefgfmt.obj stub leaves
+# __EFG_printf pointing at _no_support_loaded (float conversions print nothing).
+# These objects supply the genuine double->decimal formatter (_EFG_Format) + the
+# dtoa/cvt subsystem. They are only pulled when a program REFERENCES __setEFGfmt
+# (our minimal crt0 does NOT walk Watcom's auto-init table, so the program must
+# call __setEFGfmt() ONCE before its first %f) -- so non-float programs pay zero.
+# See docs/FLOAT_PRINTF.md.
+FPINC="$INC -i=$B/mathlib/h -i=$B/clib/startup/h"
+"$WCC" $USER -fpc $FPINC "$B/clib/streamio/c/setefg.c" -fo=setefg.obj    # __setEFGfmt: install _EFG_Format
+"$WCC" $USER -fpc $FPINC "$B/mathlib/c/cvt.c"          -fo=cvt.obj       # __cvt double formatter
+"$WCC" $USER -fpc $FPINC "$B/mathlib/c/ldcvt.c"        -fo=ldcvt.obj     # __ldcvt long-double core
+"$WCC" $USER -fpc $FPINC "$B/mathlib/c/efcvt.c"        -fo=efcvt.obj     # e/f cvt entry
+"$WCC" $USER -fpc $FPINC "$B/mathlib/c/gcvt.c"         -fo=gcvt.obj      # g cvt entry
+"$WCC" $USER -fpc $FPINC "$B/clib/startup/c/cvtbuf.c"  -fo=cvtbuf.obj    # __cvtbuf conversion buffer
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/i8ls086.asm"    -fo=i8ls086.obj  # __U8LS 64-bit shift (cvt)
+
 echo "==> Layer 2: CP/M-86 seam (BDOS) + closure stubs + port seams"
 "$WCC" $USER $INC "$SRC/port/cominit.c"  -fo=cominit.obj
 "$WCC" $USER $INC "$SRC/port/cprintf.c"  -fo=cprintf.obj     # direct-to-console printf (stdio-free tests)
@@ -310,6 +326,7 @@ rm -f clibcpm.lib
     +fdmth086.obj +fdi4086.obj +i4fd086.obj +fdc086.obj +fdn086.obj +fdfs086.obj +fsfd086.obj +fsn086.obj +fstat086.obj \
     +chipd16.obj +chipw16.obj +chipt16.obj +chipa16.obj +emustub.obj +fpsupport.obj +fpsoftstub.obj \
     +seterrno.obj +rtcntrl.obj +iobaddr.obj +_matherr.obj +fesoft.obj +hugeval.obj \
+    +setefg.obj +cvt.obj +ldcvt.obj +efcvt.obj +gcvt.obj +cvtbuf.obj +i8ls086.obj \
     +memcpy.obj +fmemcpy.obj +memset.obj +memmove.obj +memcmp.obj +gmtime.obj \
     +i4m.obj +i4d.obj \
     +cominit.obj +cprintf.obj +diskio.obj +lowlevel.obj +errnoptr.obj +abortcpm.obj \

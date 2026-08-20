@@ -15,7 +15,13 @@
 # under emu2, which now ALSO applies P_LOAD relocation (ravn/emu2-cpm86#1), so
 # disk is covered in all three models too.
 #
-# Usage:   bash run-all-models.sh              # all models, all applicable tests
+# It is ONE command: it builds+installs each model's clib+libm (via build-lib.sh)
+# if missing, then runs the gate. So a clean checkout needs only `bash
+# run-all-models.sh`.
+#
+# Usage:   bash run-all-models.sh              # build-if-missing, all models+tests
+#          BUILD=1 bash run-all-models.sh       # force a fresh build-lib.sh first
+#          BUILD=0 bash run-all-models.sh       # require a prior build (never build)
 #          MODELS="s c" bash run-all-models.sh # subset of models
 #          KEEP=1 bash run-all-models.sh        # keep build dirs for inspection
 set -u
@@ -80,13 +86,22 @@ HEAP_ORACLE=$'sorted : 0 1 2 3 4 5 6 7 8 9\ncalloc : 0\nrealloc: 0 40\nreuse  : 
 STDIO_ORACLE=$'printf 42 ok\nputs line\nfputs line\nfprintf 97406784'
 FLOAT_ORACLE="pi6=3141592 mul=40115 add=468 sub=242"
 MATH_ORACLE="sin=841470 cos=540302 atan=785398 exp=2718281 log=2302585 sqrt=1414213"
+FLTFMT_ORACLE="f=3.1416 e=2.500e+00 g=0.001"
 
 for m in $MODELS; do
+    # Build+install the model's clib+libm if absent (or always, with BUILD=1),
+    # so this gate is one command. Set BUILD=0 to require a prior build-lib.sh.
+    if [ "${BUILD:-auto}" = 1 ] || { [ "${BUILD:-auto}" != 0 ] && [ ! -f "$LIBDIR/$(model_lib "$m")" ]; }; then
+        echo ">> building clib+libm for model $m ..."
+        OUTDIR="build-lib-$m" MODEL="$m" bash build-lib.sh >"$WORK/build-$m.log" 2>&1 \
+            || { echo "!! build-lib.sh MODEL=$m FAILED -- see $WORK/build-$m.log"; grep -E 'Error!' "$WORK/build-$m.log" | grep -v '0 errors' | head; exit 1; }
+    fi
     [ -f "$LIBDIR/$(model_lib "$m")" ] || { echo "!! missing $(model_lib "$m") -- run 'MODEL=$m bash build-lib.sh' first"; exit 1; }
     run_test "$m" heap   heaptest.c  uni  exact  "$HEAP_ORACLE"
     run_test "$m" stdio  stdiotest.c uni  exact  "$STDIO_ORACLE"
     run_test "$m" float  floattest.c uni  exact  "$FLOAT_ORACLE" "-fpc"
     run_test "$m" math   mathtest.c  uni  exact  "$MATH_ORACLE"  "-fpc" libm
+    run_test "$m" fltfmt floatfmt_test.c uni exact "$FLTFMT_ORACLE" "-fpc" libm
     # disk needs the file BDOS only emu2 emulates; emu2 now also applies P_LOAD
     # relocation (ravn/emu2-cpm86#1), so it runs medium/compact .CMDs too -- disk
     # is verified in ALL models under emu2. (Requires the reloc-capable emu2; if
