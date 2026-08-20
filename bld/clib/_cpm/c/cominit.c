@@ -45,3 +45,31 @@ void __CommonInit( void )
     __setEFGfmt();
 #endif
 }
+
+/* ---- command-tail stdin/stdout redirection ------------------------------- */
+/* The standard cpm86 library always links the disk seam (diskio.c) -- any
+ * FILE* program pulls it in -- so redirection is UNCONDITIONAL here, unlike the
+ * contrib demo builds that gate it on -DCOMMONINIT_REDIRECT. The heavy lifting
+ * (argv scan, open, operand stripping, Ctrl-Z commit) lives in diskio.c next to
+ * the __qread/__qwrite seam it reroutes; these are just the crt0-facing shims.
+ */
+extern int  __apply_redirection( int argc, char **argv ); /* diskio.c */
+extern void __close_redirection( void );                  /* diskio.c */
+
+int  __CommonRedirect( int argc, char **argv );  /* prototype (clib -we) */
+void __CommonRedirectClose( void );
+
+/* __CommonRedirect -- crt0 calls this AFTER the command-tail argv parser and
+   BEFORE main(). Scans argv for  < file / > file / >> file , opens each, strips
+   the operands so main() never sees them, and returns the surviving argc. */
+int __CommonRedirect( int argc, char **argv )
+{
+    return( __apply_redirection( argc, argv ) );
+}
+
+/* __CommonRedirectClose -- crt0 calls this AFTER main() returns, to flush the
+   buffered stdout FILE and commit (Ctrl-Z + close) any redirected disk file. */
+void __CommonRedirectClose( void )
+{
+    __close_redirection();
+}

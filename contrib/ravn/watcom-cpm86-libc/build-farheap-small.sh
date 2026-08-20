@@ -24,13 +24,14 @@ WLINK="${OWLINK_BIN:-$B/wl/osxa64/wlink.exe}"
 LIBDIR="$OW/lib286/cpm86"
 INC="-i=$B/clib/h -i=$B/watcom/h -i=$B/hdr/dos/h -i=$B/clib/heap/h"
 
-FARHEAP_SIZE=0x30000                 # 192 KB ceiling; test needs 96 KB
+FARHEAP_SIZE=0xF0000                 # ~960 KB ceiling; grab up to ~1 MB if RAM has it
+SEG=${SEG:-16384}                    # VARIABLE segment size (<= 64 KB Watcom cap)
 OUTDIR="${OUTDIR:-build-farheap-small}"; mkdir -p "$OUTDIR"
 
 [ -f "$LIBDIR/clibs.lib" ]     || { echo "missing $LIBDIR/clibs.lib -- run ./build-lib.sh s first"; exit 1; }
 [ -f "$LIBDIR/cstartcpm.obj" ] || { echo "missing $LIBDIR/cstartcpm.obj -- run ./build-lib.sh s first"; exit 1; }
 
-"$WCC" -bt=dos -0 -ms -zastd=c99 $INC test/farheap_smalltest.c -fo="$OUTDIR/t.obj"
+"$WCC" -bt=dos -0 -ms -zastd=c99 -DSEG=${SEG}u $INC test/farheap_smalltest.c -fo="$OUTDIR/t.obj"
 "$WLINK" format cpm86 op dosseg op quiet op start=_cstart_ op farheap=$FARHEAP_SIZE \
     name "$OUTDIR/FHSMALL.CMD" \
     file "$LIBDIR/cstartcpm.obj" file "$OUTDIR/t.obj" library "$LIBDIR/clibs.lib"
@@ -45,5 +46,15 @@ for i in range(0,128,9):
     v=[int.from_bytes(d[i+1+2*k:i+3+2*k],'little') for k in range(4)]
     print(f'  type={t} len={v[0]:#06x} min={v[2]:#06x} max={v[3]:#06x}')
 PY
-echo "=== Unicorn run (expect PASS) ==="
-python3 ../cpm86run_unicorn.py "$OUTDIR/FHSMALL.CMD" 2>/dev/null | tr -d '\r\000'
+echo "=== Unicorn run (grab up to ~1 MB, analyse what we got) ==="
+DUMP="$OUTDIR/ram.bin"
+OUT=$(python3 ../cpm86run_unicorn.py --dump "$DUMP" "$OUTDIR/FHSMALL.CMD" 2>/dev/null | tr -d '\r\000')
+echo "$OUT"
+N=$(printf '%s' "$OUT" | grep -oE 'n=[0-9]+' | head -1 | cut -d= -f2)
+
+echo "=== Independent RAM-dump content check (oracle OUTSIDE the guest) ==="
+if [ -n "$N" ]; then
+    python3 test/verify_farheap_dump.py "$DUMP" --seg "$SEG" --count "$N"
+else
+    python3 test/verify_farheap_dump.py "$DUMP" --seg "$SEG"
+fi

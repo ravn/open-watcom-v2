@@ -33,6 +33,10 @@ extern void __InitFiles( void );    /* attach stdout/stderr FILE buffers */
 #ifdef COMMONINIT_EFG
 extern void __setEFGfmt( void );    /* install real %e/%f/%g formatter */
 #endif
+#ifdef COMMONINIT_REDIRECT
+extern int  __apply_redirection( int argc, char **argv ); /* port/diskio.c */
+extern void __close_redirection( void );                  /* port/diskio.c */
+#endif
 
 void __CommonInit( void )
 {
@@ -41,5 +45,29 @@ void __CommonInit( void )
 #endif
 #ifdef COMMONINIT_EFG
     __setEFGfmt();
+#endif
+}
+
+/* __CommonRedirect -- crt0 calls this AFTER the command-tail argv parser and
+   BEFORE main(). Only the disk-file builds (-DCOMMONINIT_REDIRECT, the ones that
+   link port/diskio.c) actually honour shell-style < / > / >> on the command
+   tail; every other build compiles this as an argc-preserving no-op so the crt0
+   call resolves without dragging the FCB disk layer into a console-only .CMD. */
+int __CommonRedirect( int argc, char **argv )
+{
+#ifdef COMMONINIT_REDIRECT
+    return( __apply_redirection( argc, argv ) );
+#else
+    (void)argv;
+    return( argc );
+#endif
+}
+
+/* __CommonRedirectClose -- crt0 calls this AFTER main() returns, to flush and
+   commit any redirected stdout file. No-op unless redirection is compiled in. */
+void __CommonRedirectClose( void )
+{
+#ifdef COMMONINIT_REDIRECT
+    __close_redirection();
 #endif
 }

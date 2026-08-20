@@ -10,7 +10,8 @@
 # same __DOS__ target as the OS-agnostic components they satisfy).
 
 objs_cpm86_086 = abortcpm.obj cominit.obj cstartcpm.obj dirent.obj diskio.obj &
-                 errnoptr.obj gtctmcpm.obj lowlevel.obj portmisc.obj stubs.obj
+                 errnoptr.obj farheap.obj gtctmcpm.obj lowlevel.obj portmisc.obj &
+                 stubs.obj
 
 !ifeq objsuffix files
 objfiles = $+ $(objs_$(system)_$(processor)) $-

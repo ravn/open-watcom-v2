@@ -131,6 +131,28 @@ static unsigned char  dma[SECT];        /* our 128-byte DMA / work buffer */
 static dfile_t       *cache_fp;         /* which file's record is in dma */
 static long           cache_rec;        /* which record is in dma (valid iff cache_fp) */
 
+/* ---- stdin/stdout redirection (shell-style  < file  > file  >> file) -------
+   CP/M's CCP has no I/O redirection, so a hosted program does it ITSELF: after
+   the crt0 command-tail parser has split the tail into argv, __apply_redirection
+   scans argv for the redirect operators, opens each named file as an ordinary
+   disk file (fd >= DISK_FIRST_FD), and records that fd here. __qread/__qwrite --
+   the single seam the whole FILE* stack (scanf/getchar/printf/fwrite/...) bottoms
+   out in -- then transparently reroute the console handles onto that fd, so the
+   ENTIRE stdin/stdout stream lands on the file with ZERO FILE* surgery: the
+   stdin/stdout FILE objects keep handles 0/1 and their buffering untouched.
+
+   stderr (handle 2) is deliberately NOT rerouted by `>`, matching Unix shells:
+   `prog > out.txt` still lets diagnostics reach the console.
+
+   Worked example -- command tail " < IN.TXT > OUT.TXT":
+     crt0 argv = {"UNZIP","<IN.TXT",">OUT.TXT",NULL}, argc=3
+     __apply_redirection opens IN.TXT (fd 3, redir_in=3), OUT.TXT (fd 4,
+     redir_out=4), strips both tokens -> argv={"UNZIP",NULL}, returns argc=1.
+     Thereafter __qread(0,..) reads record-by-record from fd 3 and __qwrite(1,..)
+     writes to fd 4; __close_redirection() commits both at program exit. */
+static int redir_in  = -1;      /* disk fd feeding stdin(0),  or -1 = console */
+static int redir_out = -1;      /* disk fd draining stdout(1), or -1 = console */
+
 static dfile_t *fd_to_file( int handle )
 {
     int i = handle - DISK_FIRST_FD;
@@ -552,6 +574,29 @@ _WCRTLINK int _sopen( const char *name, int mode, int shflag, ... )
     return( DISK_FIRST_FD + i );
 }
 
+/* Console byte input (stdin / fopen("CON")). Reads a LINE via BDOS C_READ
+   (fn 1, echoed) into out[0..len), translating the CP/M line discipline to the
+   C stream convention: CR (Enter) -> '\n' (and echo the LF so the cursor wraps),
+   Ctrl-Z (0x1A) -> end of input. Returns at the newline or at len, so stdio gets
+   a normal line-buffered read; 0 means immediate EOF (^Z first). C_READ blocks
+   until a key, which is the expected getchar()/scanf() behaviour. */
+static unsigned con_read( unsigned char *out, unsigned len )
+{
+    unsigned n = 0;
+    while( n < len ) {
+        unsigned char ch = _bdos( 1, 0 );           /* C_READ: one char, echoed */
+        if( ch == 0x1A )                             /* Ctrl-Z = EOF */
+            break;
+        if( ch == '\r' ) {                           /* Enter -> newline */
+            _bdos_conout( '\n' );                    /* echo the LF (C_READ echoed only CR) */
+            out[n++] = '\n';
+            break;                                   /* line-buffered: stop at EOL */
+        }
+        out[n++] = ch;
+    }
+    return( n );
+}
+
 /* FILE fill path (fgetc/fread) -> __qread. Returns bytes read, 0 at EOF. */
 int _WCNEAR __qread( int handle, void *buffer, unsigned len )
 {
@@ -559,8 +604,12 @@ int _WCNEAR __qread( int handle, void *buffer, unsigned len )
     unsigned char *out = (unsigned char *)buffer;
     unsigned       total = 0;
 
-    if( handle < DISK_FIRST_FD )
-        return( 0 );                                /* console: no stdin here */
+    if( handle < DISK_FIRST_FD ) {                   /* a console handle (0/1/2) */
+        if( redir_in >= 0 )                          /* stdin redirected -> disk */
+            handle = redir_in;                       /*   fall through to the file */
+        else
+            return( (int)con_read( out, len ) );     /* stdin (0): console line input */
+    }
     fp = fd_to_file( handle );
     if( fp == NULL || !fp->readable )
         return( 0 );
@@ -570,8 +619,8 @@ int _WCNEAR __qread( int handle, void *buffer, unsigned len )
        byte another handle just fflush()ed. The read loop below re-derives EOF
        from disk for a pure reader on every call, so a stale ateof cannot wedge
        the stream shut. */
-    if( fp->is_con )                                /* CON device: no byte input */
-        return( 0 );
+    if( fp->is_con )                                /* fopen("CON"): console line input */
+        return( (int)con_read( out, len ) );
     fp->ateof = 0;                                  /* recomputed below each call */
 
     while( total < len ) {
@@ -672,8 +721,10 @@ int _WCNEAR __qwrite( int handle, const void *buffer, unsigned len )
     dfile_t             *fp;
     unsigned             total = 0;
 
-    if( handle == STDOUT_FILENO || handle == STDERR_FILENO ) {
-        con_write( in, len );
+    if( handle == STDOUT_FILENO && redir_out >= 0 ) {
+        handle = redir_out;                         /* stdout redirected -> disk */
+    } else if( handle == STDOUT_FILENO || handle == STDERR_FILENO ) {
+        con_write( in, len );                       /* console (stderr stays here) */
         return( (int)len );
     }
 
@@ -1274,4 +1325,97 @@ _WCRTLINK FILE *tmpfile( void )
     fclose( fp );                       /* registry full: don't leak an entry */
     remove( name );
     return( NULL );
+}
+
+/* ---- command-tail redirection front end ---------------------------------- */
+
+/* Parse ONE redirect operand. Recognises  <name  >name  >>name  and the split
+   forms  < name / > name / >> name  (operator and file in separate argv slots).
+   On a match, opens the file and latches redir_in / redir_out; returns the
+   number of argv slots consumed (1 for the joined form, 2 for the split form),
+   or 0 if `a` is not a redirect operand (an ordinary program operand). `next`
+   is argv[i+1] (may be NULL) for the split form. */
+static int redirect_one( char *a, char *next )
+{
+    const char *name;
+    int         mode;
+    int         is_in;
+    int         consumed = 1;
+    int         fd;
+
+    if( a[0] == '<' ) {
+        is_in = 1;
+        mode  = O_RDONLY;                       /* text: reads stop at Ctrl-Z */
+        name  = a + 1;
+    } else if( a[0] == '>' && a[1] == '>' ) {
+        is_in = 0;
+        mode  = O_WRONLY | O_CREAT | O_APPEND;   /* append, create if absent */
+        name  = a + 2;
+    } else if( a[0] == '>' ) {
+        is_in = 0;
+        mode  = O_WRONLY | O_CREAT | O_TRUNC;     /* truncate/create */
+        name  = a + 1;
+    } else {
+        return( 0 );                             /* not a redirect operand */
+    }
+
+    if( *name == '\0' ) {                        /* split form: name is next slot */
+        if( next == NULL )
+            return( 1 );                         /* dangling operator: just drop it */
+        name = next;
+        consumed = 2;
+    }
+
+    fd = _sopen( name, mode, 0 );
+    if( fd >= 0 ) {                              /* open failure: leave on console */
+        if( is_in ) {
+            if( redir_in >= 0 )
+                __close( redir_in );             /* last `<` wins */
+            redir_in = fd;
+        } else {
+            if( redir_out >= 0 )
+                __close( redir_out );            /* last `>`/`>>` wins */
+            redir_out = fd;
+        }
+    }
+    return( consumed );
+}
+
+/* __apply_redirection -- called from crt0 (via cominit.c's __CommonRedirect)
+   AFTER the command tail is split into argv and BEFORE main(). Scans argv[1..]
+   for redirect operands, opens them, and compacts argv so main() sees only the
+   real operands. Returns the new argc. argv[0] (program name) is always kept. */
+int __apply_redirection( int argc, char **argv )
+{
+    int i;
+    int out = 1;                                 /* compacted write index */
+
+    for( i = 1; i < argc; i++ ) {
+        char *next = ( i + 1 < argc ) ? argv[i + 1] : NULL;
+        int   used = redirect_one( argv[i], next );
+        if( used == 0 ) {
+            argv[out++] = argv[i];               /* ordinary operand: keep it */
+        } else {
+            i += used - 1;                       /* skip a split-form file slot */
+        }
+    }
+    argv[out] = NULL;
+    return( out );
+}
+
+/* __close_redirection -- called from crt0 AFTER main() returns. Flush the
+   buffered stdout FILE (our minimal crt0 runs no atexit chain, so nothing else
+   would) then commit each redirected disk file: __close writes the final partial
+   record, appends the Ctrl-Z text EOF, and closes the directory entry. */
+void __close_redirection( void )
+{
+    if( redir_out >= 0 ) {
+        fflush( stdout );                        /* drain the FILE buffer first */
+        __close( redir_out );
+        redir_out = -1;
+    }
+    if( redir_in >= 0 ) {
+        __close( redir_in );
+        redir_in = -1;
+    }
 }

@@ -39,6 +39,8 @@
         extrn   main_ : near
         extrn   wc_heap_init_ : near
         extrn   __CommonInit_ : near
+        extrn   __CommonRedirect_ : near
+        extrn   __CommonRedirectClose_ : near
         public  _cstart_
         public  _small_code_
 _small_code_    equ     0
@@ -105,7 +107,15 @@ ct_done:
         mov     word ptr ds:__argc, bx  ; publish argc to the marker
         mov     ax, bx                  ; argc -> AX (__watcall)
         mov     dx, offset DGROUP:_argvtab   ; argv -> DX
+; ow: apply shell-style stdin/stdout redirection (< > >>) on the command tail.
+; __CommonRedirect scans argv, opens the redirect files, compacts argv in place
+; and returns the surviving argc in AX (no-op in builds without the disk layer).
+; DX is call-clobbered, so reload the argv pointer before calling main.
+        call    __CommonRedirect_
+        mov     dx, offset DGROUP:_argvtab   ; argv -> DX (reload after the call)
         call    main_
+; ow: flush + commit any redirected stdout file before the CP/M system reset.
+        call    __CommonRedirectClose_
         xor     dx, dx
         mov     cl, 0                   ; BDOS 0 = System Reset (terminate)
         int     0E0h

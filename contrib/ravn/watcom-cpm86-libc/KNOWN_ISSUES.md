@@ -6,6 +6,21 @@ emu2** (and so still needs the MAME/RC759 oracle), and what is an **inherent
 CP/M limitation** rather than a bug. Verified-and-working functionality is in
 `README.md`; this file is deliberately the pessimist's view.
 
+## Console `scanf`/`getchar` (stdin) hangs in MEDIUM model (PARKED)
+
+`port/diskio.c`'s `con_read()` implements stdin as BDOS `C_READ` (fn 1) byte
+input; `scanf`/`getchar` from the console work in **small and compact** (verified
+under both Unicorn and emu2, `test/coninput_test.c`, `conin` row of
+`run-all-models.sh`). In **medium** the same program hangs with no output on BOTH
+runners. It is NOT the console seam: a direct `_bdos(1,0)` read echoes correctly
+in medium, and console *output* (fn 2) works in medium. The hang is in the
+stdin-side FILE\* fill path (`getchar` → `__qread(0,...)` → `con_read`) under the
+medium far-code model specifically — disk-file `fgetc` works in medium, so it is
+narrowed to handle-0 (stdin). Root cause not yet found; the `conin` test SKIPs
+medium. Note `sscanf` (the `scanf` row) exercises the same `%`-parser + `__cnvs2d`
+float read in all three models and passes — only the console *byte source* in
+medium is affected.
+
 Status legend: **BUG** (wrong result), **GAP** (unimplemented), **LIMIT**
 (inherent to the platform, not fixable in the library), **UNVERIFIED** (works
 under emu2 but not yet confirmed on the authoritative MAME/RC759 oracle).
@@ -248,14 +263,14 @@ Recorded here so they are not lost; no action taken now.
 
 ### 8. Enhancements / deferred (not blocking)
 
-- **stat timestamps via F_TIMEDATE (fn 102)** — `stat()` leaves
+- **stat timestamps via F_TIMEDATE (fn 102)** — Tracked: **ravn/open-watcom-v2-ccpm86#31**. `stat()` leaves
   st_atime/mtime/ctime = 0. The RC759 medium IS CP/M 3 (label `PIC 2-3.1-31`,
   create+update datestamps enabled; real SFCBs decode to 1985-03-26 12:54) so
   the data exists; reading it needs fn 102, runtime-gated off on emu2 (no fn
   102, max BDOS case 105). The version discriminator (real RC759 fn 12 return
   vs emu2 0x0031) is UNVERIFIED — must be MAME-probed empirically, not guessed.
   Independent assertion oracle = raw SFCB byte-decode.
-- **fscanf float decouple** — Watcom's `scnf.c` compiles `scan_float()`
+- **fscanf float decouple** — Tracked: **ravn/open-watcom-v2-ccpm86#32**. Watcom's `scnf.c` compiles `scan_float()`
   unconditionally, so integer-only `fscanf` still drags the soft-float stack.
   Make float scanning link only when a floating conversion (%e/%f/%g) is used.
   Non-blocker (user-confirmed).

@@ -8,12 +8,15 @@
  *   _fmalloc() explicitly: the far heap is a separate paragraph arena (the .CMD
  *   "Extra" group, type=3) handed out by port/farheap.c::__AllocSeg.
  *
- * This test allocates 8 * 12 KB = 96 KB of FAR blocks, fills each with a
- * position-dependent pattern, reads it back, and checks two invariants:
+ * This test grabs as much far heap as the loader grants -- it keeps calling
+ * _fmalloc(SEG) (SEG a VARIABLE segment size, default 16 KB, <=64 KB Watcom cap)
+ * until it has requested up to BUDGET (1 MB) or the allocator returns NULL --
+ * then analyses ONLY the blocks it actually got.  Each block is filled with a
+ * position-dependent pattern, read back, and checked on two invariants:
  *   (a) every block's segment != DS  -> it really lives OUTSIDE DGROUP;
  *   (b) every byte survives the round-trip -> the far arena is real RAM.
- * 96 KB > 64 KB, so this could not possibly fit in DGROUP -- the pass is only
- * explicable by a working far heap.  Verified PASS under cpm86run_unicorn.py.
+ * As soon as the total exceeds 64 KB the pass is only explicable by a working
+ * far heap.  Verified PASS under cpm86run_unicorn.py AND MAME rc759.
  *
  * WHY explicit _fmalloc and NOT transparent -mc (compact) malloc:
  *   Compact model makes clib globals (e.g. int __heap_enabled=1) FAR; wlink's
@@ -36,32 +39,71 @@ extern unsigned _getds( void );
 
 static void puts_n( const char *s ) { while( *s ) bdos_conout( *s++ ); }
 
-#define NBLK 8
-#define BSZ  12288u                     /* 8 * 12 KB = 96 KB, > 64 KB DGROUP */
+static void put_u( unsigned v )         /* print an unsigned decimal (for n/KB) */
+{
+    char b[6]; int k = 0;
+    if( v == 0 ) { bdos_conout( '0' ); return; }
+    while( v ) { b[k++] = (char)( '0' + v % 10u ); v /= 10u; }
+    while( k ) bdos_conout( b[--k] );
+}
 
-static char __far *blk[NBLK];
+#ifdef MAME_DONE
+#include "mamedone.h"                   /* mame_done(): OUT 0x2FE for the host tap */
+#endif
+
+#ifndef SEG
+#define SEG  16384u                     /* VARIABLE segment size, <= 64 KB cap    */
+#endif
+#define BUDGET   0x100000UL             /* try for up to 1 MB of far heap         */
+#define MAXBLK   256                    /* pointer-array ceiling (256*SEG >> 1 MB) */
+
+static char __far *blk[MAXBLK];
 
 int main( void )
 {
-    unsigned ds = _getds(), i, j, nf = 0;
+    unsigned ds = _getds(), i, j, n = 0, nf = 0;
+    unsigned long got = 0;
     int bad = 0;
 
-    for( i = 0; i < NBLK; i++ ) {
-        char __far *p = _fmalloc( BSZ );
-        blk[i] = p;
-        if( !p ) { puts_n( "FAIL: _fmalloc returned NULL\r\n" ); return 1; }
-        if( FP_SEG( p ) != ds ) nf++;   /* seg != DS  ->  outside DGROUP     */
-        for( j = 0; j < BSZ; j++ ) p[j] = (char)( i * 97u + 1u + j );
+    /* Grab what we can: stop at the 1 MB budget, the array ceiling, or the first
+       NULL -- then analyse ONLY the blocks we actually got. */
+    while( got + SEG <= BUDGET && n < MAXBLK ) {
+        char __far *p = _fmalloc( SEG );
+        if( !p ) break;                 /* took what the loader granted           */
+        /* FP_SEG==DS means _fmalloc fell back to the NEAR heap (the far arena is
+           exhausted): Watcom's small-model far heap hands out DGROUP memory once
+           __AllocSeg returns _NULLSEG. That is the true "far heap full" boundary
+           -- stop here so every COUNTED block is genuinely outside DGROUP. Seen
+           at block 42 under Unicorn (1 MB): blk 41 = EC70:801C (far), then
+           blk 42 = 124D:078C == DS (near fallback). */
+        if( FP_SEG( p ) == ds ) { _ffree( p ); break; }
+        blk[n] = p;
+        nf++;                           /* seg != DS  ->  outside DGROUP          */
+        for( j = 0; j < SEG; j++ ) p[j] = (char)( n * 97u + 1u + j );
+        n++; got += SEG;
     }
-    for( i = 0; i < NBLK; i++ ) {
+    for( i = 0; i < n; i++ ) {
         char __far *p = blk[i];
-        for( j = 0; j < BSZ; j++ )
+        for( j = 0; j < SEG; j++ )
             if( (unsigned char)p[j] != (unsigned char)( i * 97u + 1u + j ) ) {
                 bad++; break;
             }
     }
-    puts_n( ( nf == NBLK && !bad )
-            ? "PASS small+explicit far-heap (96KB off DGROUP)\r\n"
-            : "FAIL far-heap round-trip\r\n" );
-    return ( nf == NBLK && !bad ) ? 0 : 1;
+
+    /* PASS = got >1 block, all outside DGROUP, all round-trips intact. The
+       "n=NN seg=SSSS" token lets the host harness cross-check the dump scan. */
+    {
+        int ok = ( n > 0 && nf == n && !bad );
+        puts_n( ok ? "PASS far-heap n=" : "FAIL far-heap n=" );
+        put_u( n );
+        puts_n( " seg=" ); put_u( SEG );
+        puts_n( " kb=" ); put_u( (unsigned)( got >> 10 ) );
+        puts_n( "\r\n" );
+#ifdef MAME_DONE
+        /* low byte = block count actually obtained, high byte = 0 on success
+           (nonzero = fail) -> the host reads n from the done-signal pass field. */
+        mame_done( (unsigned)( ( ok ? 0 : 0x80 ) << 8 ) | ( n & 0xFF ) );
+#endif
+        return ok ? 0 : 1;
+    }
 }

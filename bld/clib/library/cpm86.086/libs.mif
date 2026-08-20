@@ -8,12 +8,24 @@
 #     pull still lands _cstart_ at code-group offset 0), so wlink's `system
 #     cpm86` block auto-selects it via the object's default-library record with
 #     NO `libfile` -- exactly the 16-bit `system dos` convention.
-# `_cpm` is listed FIRST so its diskio.obj owns the fd-layer symbols
-# (__qwrite/__qread/__lseek/__close/_sopen/isatty/...) in the merged archive
-# dictionary; the DOS-coupled handleio objects (qwrit.obj/__lseek.obj, which
-# reference the INT 21h __set_errno_dos) are thereby shadowed and never linked,
-# while the OS-agnostic handleio objects (e.g. textmode.obj -> _fmode) still
-# resolve on demand.
+# `_cpm` is listed FIRST so its objects own the OS-coupled symbols in the
+# merged archive dictionary. When a later msdos.086 component object exports a
+# symbol `_cpm` has already defined, wlib DROPS that object outright (it is not
+# added to the archive at all -- verify with `wlib clibs.lib` + grep: the DOS
+# seams below have ZERO modules), so the CP/M-86 lib carries NO dead INT 21h
+# code -- this is genuine exclusion, not retain-and-shadow. Three OS layers are
+# replaced this way:
+#   - fd-layer:  diskio.obj  -> drops the DOS handleio objects (qwrit.obj/
+#                __lseek.obj, which trap INT 21h via __set_errno_dos). The
+#                OS-agnostic handleio objects (e.g. textmode.obj -> _fmode)
+#                have no symbol clash and still resolve on demand.
+#   - near heap: lowlevel.obj (__brk/sbrk over an in-DGROUP arena) -> drops
+#                heap/c/sbrk.obj (INT 21h AH=4Ah TinySetBlock).
+#   - far heap:  farheap.obj (__AllocSeg/__GrowSeg/__FreeSeg carving the .CMD
+#                type-3 Extra reservation) -> drops heap/c/{allocseg,growseg,
+#                freeseg}.obj (INT 21h AH=48h/49h TinyAllocBlock/TinyFreeBlock).
+#                The OS-generic far-heap API (_fmalloc/_ffree/_frealloc/... in
+#                heap/c/) is UNCHANGED and links on top of these seams.
 # The agnostic components are OS-independent by construction, so cpm86 reuses
 # the standard-built msdos.086 component libraries rather than rebuilding
 # byte-identical objects; only `_cpm` is compiled for system=cpm86.
