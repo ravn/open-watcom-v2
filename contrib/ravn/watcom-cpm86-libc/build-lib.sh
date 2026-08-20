@@ -77,15 +77,17 @@ MODEL="${MODEL:-s}"
 case "$MODEL" in
   s) ZMFLAG=""    ; CRT0SRC="crt0sm.asm" ; LIBNAME="clibs.lib"  ; CRT0NAME="cstartcpm.obj" ;;
   m) ZMFLAG="-zm" ; CRT0SRC="crt0mm.asm" ; LIBNAME="clibm.lib"  ; CRT0NAME="cstartmm.obj"  ;;
-  # KNOWN-BLOCKED at runtime: compact model makes clib globals (e.g.
-  # int __heap_enabled=1) FAR, which wlink's `format cpm86` emits as a SECOND
-  # type=2 group the CP/M-86 .CMD loader (groups keyed by TYPE 1-8) cannot
-  # place -> those globals read 0 -> __heap_enabled==0 -> malloc()==NULL.
-  # Root cause is a wlink/loader limitation, not this clib; fixing it needs
-  # wlink to emit compact far-data as its own loader-placeable group + far
-  # relocation. Until then use MODEL=s + explicit _fmalloc (proven working:
-  # test/farheap_smalltest.c, build-farheap-small.sh). This target still
-  # builds clibc.lib cleanly as the foundation for that future wlink work.
+  # WORKS at runtime (was blocked before the wlink type-3 EXTRA fix `09c2eb3099`):
+  # compact model makes clib globals (e.g. int __heap_enabled=1) FAR. wlink's
+  # `format cpm86` used to emit that as a SECOND type=2 group the CP/M-86 loader
+  # (groups keyed by TYPE 1-8) could not place -> globals read 0 -> malloc()==NULL.
+  # Now program far data is coalesced into ONE type-3 EXTRA group the loader DOES
+  # place, so __heap_enabled reads 1 and the transparent far malloc()/realloc()
+  # path runs. Verified: run-all-models.sh compact heap/stdio/float all PASS under
+  # Unicorn; link compact programs with `option farheap=<size>`. (The remaining
+  # open item is far-HEAP-vs-far-DATA slab overlap for programs with LOTS of far
+  # data -- see cmd_check.py [F1] + test/compact_farheap_test.c; heaptest's small
+  # far data does not hit it.)
   c) ZMFLAG=""    ; CRT0SRC="crt0cm.asm" ; LIBNAME="clibc.lib"  ; CRT0NAME="cstartcm.obj"  ;;
   *) echo "MODEL must be s, m or c (got '$MODEL')" >&2; exit 1 ;;
 esac
@@ -182,6 +184,7 @@ cw heap/c/heapen.c    heapen.obj
 cw heap/c/nheapmin.c  nheapmin.obj
 cw heap/c/mem.c       mem.obj
 cw heap/c/bfree.c     bfree.obj
+cw heap/c/bexpand.c   bexpand.obj    # _bexpand: based/far realloc grow-in-place core
 cw heap/c/_expand.c   _expand.obj
 cw heap/c/nmemneed.c  nmemneed.obj
 cw heap/c/nmsize.c    nmsize.obj
@@ -195,6 +198,7 @@ cw heap/c/fcalloc.c   fcalloc.obj
 cw heap/c/frealloc.c  frealloc.obj
 cw heap/c/fmsize.c    fmsize.obj
 cw heap/c/fmemneed.c  fmemneed.obj
+cw heap/c/fexpand.c   fexpand.obj    # _fexpand: far realloc grow-in-place
 cw heap/c/fheapset.c  fheapset.obj
 cw heap/c/fheapchk.c  fheapchk.obj
 cw heap/c/fheapmin.c  fheapmin.obj
@@ -202,9 +206,13 @@ cw heap/c/fheapwal.c  fheapwal.obj
 
 echo "==> Layer 1: mem helpers"
 cw memory/c/memcpy.c  memcpy.obj
+cw memory/c/fmemcpy.c fmemcpy.obj    # _fmemcpy: far realloc block copy
 cw memory/c/memset.c  memset.obj
 cw memory/c/memmove.c memmove.obj
 cw memory/c/memcmp.c  memcmp.obj
+
+echo "==> Layer 1: qsort (stdlib)"
+cw search/c/qsort.c   qsort.obj
 
 echo "==> Layer 1: time-conversion subsystem (pure computation, no OS trap)"
 cw time/c/gmtime.c    gmtime.obj      # UTC broken-down time
@@ -222,8 +230,25 @@ echo "==> Layer 1: long mul/div helpers (%ld, lseek arithmetic)"
 "$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/i4m.asm" -fo=i4m.obj
 "$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/i4d.asm" -fo=i4d.obj
 
+# --- Layer 1: double SOFT-FLOAT runtime (-fpc __FDxemu path, NO 8087) ---------
+# The RC759 target has no 8087. Programs compiled -fpc emit __FDx double libcalls
+# that dispatch at runtime on __real87 (=0 here) to a PURE-SOFTWARE path. These
+# asm helpers make that path resolve; without them any program using `double`
+# (printf %f, arithmetic) fails to link (FIDRQQ/FIWRQQ/__CHP undefined). Same set
+# build-float.sh links standalone; archived here so the shipped lib is float-ready
+# in every model. AINC gives the fp asm its config/register-name includes.
+AINC="-i=$B/watcom/h -i=$B/comp_cfg/h"
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/fdmth086.asm" -fo=fdmth086.obj  # __FDA/__FDS/__FDM/__FDD (+emu)
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/fdi4086.asm" -fo=fdi4086.obj    # __FDI4: double -> long
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/i4fd086.asm" -fo=i4fd086.obj    # __I4FD: long -> double
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/fpu/a/chipd16.asm"     -fo=chipd16.obj    # __fdiv_m64r software divider
+"$WASM" -m$MODEL -0 $AINC "$B/fpuemu/i86/asm/emustub.asm"            -fo=emustub.obj     # FIxRQQ stubs + no-op emu init
+"$WASM" -m$MODEL -0 $AINC "$SRC/port/fpsupport.asm"                  -fo=fpsupport.obj   # F8Over/Under/DivZero
+"$WASM" -m$MODEL -0 $AINC "$SRC/port/fpsoftstub.asm"                 -fo=fpsoftstub.obj  # __real87=0 (force soft path)
+
 echo "==> Layer 2: CP/M-86 seam (BDOS) + closure stubs + port seams"
 "$WCC" $USER $INC "$SRC/port/cominit.c"  -fo=cominit.obj
+"$WCC" $USER $INC "$SRC/port/cprintf.c"  -fo=cprintf.obj     # direct-to-console printf (stdio-free tests)
 "$WCC" $USER $INC "$SRC/port/diskio.c"   -fo=diskio.obj      # FCB BDOS file I/O
 "$WCC" $USER $INC ${WC_ARENA_BYTES:+-dWC_ARENA_BYTES=$WC_ARENA_BYTES} "$SRC/port/lowlevel.c" -fo=lowlevel.obj
 "$WCC" $USER $INC "$SRC/port/farheap.c"  -fo=farheap.obj     # Stage A far heap __AllocSeg/__GrowSeg
@@ -236,7 +261,7 @@ echo "==> Layer 2: CP/M-86 seam (BDOS) + closure stubs + port seams"
 "$WCC" $USER $INC -DDISKIO_LSEEK "$SRC/port/stubs.c" -fo=stubs.obj
 
 echo "==> startup (archived as a library member AND emitted as a standalone obj)"
-"$WASM" -m$MODEL -0 ${WC_STACK_BYTES:+-DWC_STACK_BYTES=$WC_STACK_BYTES} "$SRC/port/$CRT0SRC" -fo=crt0.obj
+"$WASM" -m$MODEL -0 ${WC_STACK_BYTES:+-DWC_STACK_BYTES=$WC_STACK_BYTES} ${WC_STACK_FILL:+-DWC_STACK_FILL=$WC_STACK_FILL} "$SRC/port/$CRT0SRC" -fo=crt0.obj
 
 echo "==> archive clibcpm.lib"
 rm -f clibcpm.lib
@@ -259,14 +284,16 @@ rm -f clibcpm.lib
     +ioalloc.obj +chktty.obj +iob.obj +initfile.obj +comtflag.obj +freefp.obj \
     +textmode.obj \
     +nmalloc.obj +nfree.obj +calloc.obj +nrealloc.obj +grownear.obj \
-    +amblksiz.obj +heapen.obj +nheapmin.obj +mem.obj +bfree.obj +_expand.obj \
+    +amblksiz.obj +heapen.obj +nheapmin.obj +mem.obj +bfree.obj +bexpand.obj +_expand.obj \
     +nmemneed.obj +nmsize.obj +nexpand.obj +nheapunl.obj \
     +fmalloc.obj +ffree.obj +fcalloc.obj +frealloc.obj +fmsize.obj \
-    +fmemneed.obj +fheapset.obj +fheapchk.obj +fheapmin.obj +fheapwal.obj \
+    +fmemneed.obj +fexpand.obj +fheapset.obj +fheapchk.obj +fheapmin.obj +fheapwal.obj \
     +farheap.obj \
-    +memcpy.obj +memset.obj +memmove.obj +memcmp.obj +gmtime.obj \
+    +qsort.obj \
+    +fdmth086.obj +fdi4086.obj +i4fd086.obj +chipd16.obj +emustub.obj +fpsupport.obj +fpsoftstub.obj \
+    +memcpy.obj +fmemcpy.obj +memset.obj +memmove.obj +memcmp.obj +gmtime.obj \
     +i4m.obj +i4d.obj \
-    +cominit.obj +diskio.obj +lowlevel.obj +errnoptr.obj +abortcpm.obj \
+    +cominit.obj +cprintf.obj +diskio.obj +lowlevel.obj +errnoptr.obj +abortcpm.obj \
     +portmisc.obj +gtctmcpm.obj +dirent.obj +stubs.obj \
     +localtim.obj +mktime.obj +locmktim.obj +timeutil.obj +leapyear.obj \
     +tzset.obj +time.obj

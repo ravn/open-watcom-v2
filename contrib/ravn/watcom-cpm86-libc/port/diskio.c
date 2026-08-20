@@ -640,9 +640,32 @@ int _WCNEAR __qread( int handle, void *buffer, unsigned len )
 }
 
 /* FILE flush path (flush/fwrite) -> __qwrite. Console handles 1/2 go to the CP/M
-   console via BDOS C_WRITE (verbatim: text-mode fputc already made "\r\n" in the
-   FILE buffer). Disk handles do a read-modify-write of each 128-byte record via
-   WRITE RANDOM, so an untouched record tail keeps its Ctrl-Z EOF marker. */
+   console via BDOS C_WRITE. The CP/M console is a text device that does NOT add
+   CR for a bare LF, so we insert one -- but idempotently: a '\n' already preceded
+   by '\r' (the stdio/fputc path pre-translates "\n" -> "\r\n" in the FILE buffer)
+   is left alone, while a bare '\n' from a raw write(1/2,...) (e.g. Info-ZIP UnZip's
+   messages, which use write(fileno(stderr),...) with no USE_FWRITE) gets its CR.
+   That way both paths render clean CR/LF and neither doubles to "\r\r\n".
+   The last-byte state is kept STATIC across calls: a stdio flush can split a
+   "\r\n" exactly on the FILE-buffer boundary, so the '\r' ends one __qwrite and
+   the '\n' opens the next -- a per-call reset would then see prev=-1 and inject
+   a spurious CR ("\r\r\n"). Console output is strictly sequential (one BDOS
+   stream, no interleaving), so a file-scope prev is safe and correct here.
+   Disk handles do a read-modify-write of each 128-byte record via WRITE RANDOM,
+   so an untouched record tail keeps its Ctrl-Z EOF marker. */
+static void con_write( const unsigned char *in, unsigned len )
+{
+    static int prev = -1;          /* last byte emitted, across calls */
+    unsigned   i;
+    for( i = 0; i < len; i++ ) {
+        unsigned char c = in[i];
+        if( c == '\n' && prev != '\r' )
+            _bdos_conout( '\r' );   /* bare LF -> CR LF; existing CR LF untouched */
+        _bdos_conout( c );
+        prev = c;
+    }
+}
+
 int _WCNEAR __qwrite( int handle, const void *buffer, unsigned len )
 {
     const unsigned char *in = (const unsigned char *)buffer;
@@ -650,9 +673,7 @@ int _WCNEAR __qwrite( int handle, const void *buffer, unsigned len )
     unsigned             total = 0;
 
     if( handle == STDOUT_FILENO || handle == STDERR_FILENO ) {
-        unsigned i;
-        for( i = 0; i < len; i++ )
-            _bdos_conout( in[i] );
+        con_write( in, len );
         return( (int)len );
     }
 
@@ -660,9 +681,7 @@ int _WCNEAR __qwrite( int handle, const void *buffer, unsigned len )
     if( fp == NULL || !fp->writable )
         return( -1 );
     if( fp->is_con ) {                              /* fopen("CON")/freopen -> console */
-        unsigned i;
-        for( i = 0; i < len; i++ )
-            _bdos_conout( in[i] );
+        con_write( in, len );
         return( (int)len );
     }
 

@@ -116,8 +116,48 @@ _DATA   ends
 ifndef WC_STACK_BYTES
 WC_STACK_BYTES equ 2048
 endif
+; Stack-overflow canary. The stack is pre-painted with WC_STACK_FILL and grows
+; DOWN from stktop, so any byte the program never pushes to keeps the fill. The
+; stkfree() helper below counts the intact fill bytes from the bottom (stkbot)
+; upward: that count is the stack HEADROOM (bytes never used); 0 means the stack
+; was driven all the way to its floor -- i.e. it overflowed into the arena just
+; below (exactly the >=32 KB UnZip DEFLATE crash). Precise detection needs a
+; distinctive, rarely-pushed fill: build the diagnostic clib with
+; -DWC_STACK_FILL=0A5h (default 0 keeps production stack contents unchanged and
+; still gives a usable estimate, since real pushes -- return addresses, saved
+; BP -- are almost never zero at the very bottom).
+ifndef WC_STACK_FILL
+WC_STACK_FILL equ 0
+endif
 STACK   segment word public 'STACK'
-        db      WC_STACK_BYTES dup(0)
+        public  stkbot
+stkbot  label   word
+        db      WC_STACK_BYTES dup(WC_STACK_FILL)
+        public  stktop
 stktop  label   word
 STACK   ends
+
+BEGTEXT segment word public 'CODE'
+        assume  cs:BEGTEXT, ds:DGROUP, ss:DGROUP
+; unsigned stkfree(void) -- __watcall, result in AX. Scans the STACK segment
+; from stkbot up while the byte still equals the WC_STACK_FILL sentinel and
+; returns the number of untouched bytes (headroom). 0 => stack overflow.
+; SS==DS==DGROUP in small model, so the STACK bytes are addressable via DS.
+        public  stkfree_
+stkfree_:
+        push    si
+        mov     si, offset DGROUP:stkbot
+        xor     ax, ax
+sf_loop:
+        cmp     si, offset DGROUP:stktop
+        jae     sf_done
+        cmp     byte ptr [si], WC_STACK_FILL
+        jne     sf_done
+        inc     ax
+        inc     si
+        jmp     sf_loop
+sf_done:
+        pop     si
+        ret
+BEGTEXT ends
         end     _cstart_
