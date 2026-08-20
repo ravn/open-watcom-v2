@@ -33,11 +33,12 @@
 # startup first. The standalone cstartcpm.obj/cstartmm.obj remain for the
 # explicit-`file` demo scripts (build.sh, build-medium.sh).
 #
-# NOTE: deliberately EXCLUDES the scanf family (scnf/fscanf) and the 8087
-# float emulator (FIDRQQ/FIERQQ/FIWRQQ, __U8M).  Nothing in the string/FILE*
-# core needs them; they are added only by programs that actually call *scanf
-# or printf %e/%f/%g.  Keeping them out halves the code footprint -- important
-# under the 64 KB single-code-segment small-model ceiling.
+# NOTE: the scanf family (scnf/sscanf/fscanf/scanf) and the real %e/%f/%g printf
+# formatter ARE archived now, but as ON-DEMAND members: nothing in the string/
+# FILE* core references them, so a program pulls them only if it actually calls
+# *scanf or __setEFGfmt().  Integer-only programs keep the small footprint that
+# matters under the 64 KB single-code-segment small-model ceiling.  Float I/O
+# (%f read or write) additionally needs libm + a one-time __setEFGfmt() call.
 # ===========================================================================
 set -e
 cd "$(dirname "$0")"
@@ -149,6 +150,19 @@ cw streamio/c/fwrite.c   fwrite.obj
 cw streamio/c/flush.c    flush.obj
 cw streamio/c/fflush.c   fflush.obj
 cw streamio/c/perror.c   perror.obj
+
+echo "==> Layer 1: scanf family (sscanf/fscanf/scanf + %-parser core)"
+# The scanf conversion core scnf.c + entries. Float reads (%e/%f/%g) go through
+# __EFG_scanf, which __setEFGfmt() points at __cnvs2d (in libm) -- so a program
+# reading floats calls __setEFGfmt() once and links libm, exactly like %f print.
+cw streamio/c/scnf.c     scnf.obj       # __scnf: the %-conversion scanner core
+cw string/c/sscanf.c     sscanf.obj     # sscanf (string source)
+cw streamio/c/fscanf.c   fscanf.obj     # fscanf (FILE* source)
+cw streamio/c/scanf.c    scanf.obj      # scanf (stdin)
+"$WCC" $CLIB $INC -i="$B/clib/char/h" "$B/clib/char/c/isdigit.c" -fo=isdigit.obj  # scanner classification (functions)
+"$WCC" $CLIB $INC -i="$B/clib/char/h" "$B/clib/char/c/isspace.c" -fo=isspace.obj
+"$WCC" $CLIB $INC -i="$B/clib/mbyte/h" "$B/clib/mbyte/c/mbtowc.c" -fo=mbtowc.obj   # scanner multibyte step
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/i8m086.asm" -fo=i8m086.obj  # __U8M 64-bit mul (cvt/scan)
 
 echo "==> Layer 1: stdio FILE* read/open path"
 cw streamio/c/fopen.c    fopen.obj
@@ -272,6 +286,7 @@ AINC="-i=$B/watcom/h -i=$B/comp_cfg/h"
 # See docs/FLOAT_PRINTF.md.
 FPINC="$INC -i=$B/mathlib/h -i=$B/clib/startup/h"
 "$WCC" $USER -fpc $FPINC "$B/clib/streamio/c/setefg.c" -fo=setefg.obj    # __setEFGfmt: install _EFG_Format
+"$WCC" $USER -fpc $FPINC "$B/mathlib/c/efgfmt.c"       -fo=efgfmt.obj    # _EFG_Format (SOURCE build -> adds %a/%A; the prebuilt libm one lacks it. clib links first so this wins)
 "$WCC" $USER -fpc $FPINC "$B/mathlib/c/cvt.c"          -fo=cvt.obj       # __cvt double formatter
 "$WCC" $USER -fpc $FPINC "$B/mathlib/c/ldcvt.c"        -fo=ldcvt.obj     # __ldcvt long-double core
 "$WCC" $USER -fpc $FPINC "$B/mathlib/c/efcvt.c"        -fo=efcvt.obj     # e/f cvt entry
@@ -312,6 +327,7 @@ rm -f clibcpm.lib
     +printf.obj +fprintf.obj +fprtf.obj +fputc.obj +fputs.obj +puts.obj \
     +putchar.obj +getchar.obj +gets.obj \
     +fwrite.obj +flush.obj +fflush.obj +perror.obj \
+    +scnf.obj +sscanf.obj +fscanf.obj +scanf.obj +isdigit.obj +isspace.obj +mbtowc.obj +i8m086.obj \
     +fopen.obj +fclose.obj +allocfp.obj +fgetc.obj +fgets.obj +fread.obj \
     +fseek.obj +ftell.obj +rewind.obj +feof.obj +ferror.obj +ungetc.obj \
     +ioalloc.obj +chktty.obj +iob.obj +initfile.obj +comtflag.obj +freefp.obj \
@@ -326,7 +342,7 @@ rm -f clibcpm.lib
     +fdmth086.obj +fdi4086.obj +i4fd086.obj +fdc086.obj +fdn086.obj +fdfs086.obj +fsfd086.obj +fsn086.obj +fstat086.obj \
     +chipd16.obj +chipw16.obj +chipt16.obj +chipa16.obj +emustub.obj +fpsupport.obj +fpsoftstub.obj \
     +seterrno.obj +rtcntrl.obj +iobaddr.obj +_matherr.obj +fesoft.obj +hugeval.obj \
-    +setefg.obj +cvt.obj +ldcvt.obj +efcvt.obj +gcvt.obj +cvtbuf.obj +i8ls086.obj \
+    +setefg.obj +efgfmt.obj +cvt.obj +ldcvt.obj +efcvt.obj +gcvt.obj +cvtbuf.obj +i8ls086.obj \
     +memcpy.obj +fmemcpy.obj +memset.obj +memmove.obj +memcmp.obj +gmtime.obj \
     +i4m.obj +i4d.obj \
     +cominit.obj +cprintf.obj +diskio.obj +lowlevel.obj +errnoptr.obj +abortcpm.obj \

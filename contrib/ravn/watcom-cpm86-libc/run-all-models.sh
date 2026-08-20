@@ -86,7 +86,8 @@ HEAP_ORACLE=$'sorted : 0 1 2 3 4 5 6 7 8 9\ncalloc : 0\nrealloc: 0 40\nreuse  : 
 STDIO_ORACLE=$'printf 42 ok\nputs line\nfputs line\nfprintf 97406784'
 FLOAT_ORACLE="pi6=3141592 mul=40115 add=468 sub=242"
 MATH_ORACLE="sin=841470 cos=540302 atan=785398 exp=2718281 log=2302585 sqrt=1414213"
-FLTFMT_ORACLE="f=3.1416 e=2.500e+00 g=0.001"
+FLTFMT_ORACLE="f=3.1416 e=2.500e+00 g=0.001 a=0x1.8p+0"
+SCANF_ORACLE="n=2 f=314159 i=42"
 
 for m in $MODELS; do
     # Build+install the model's clib+libm if absent (or always, with BUILD=1),
@@ -102,6 +103,7 @@ for m in $MODELS; do
     run_test "$m" float  floattest.c uni  exact  "$FLOAT_ORACLE" "-fpc"
     run_test "$m" math   mathtest.c  uni  exact  "$MATH_ORACLE"  "-fpc" libm
     run_test "$m" fltfmt floatfmt_test.c uni exact "$FLTFMT_ORACLE" "-fpc" libm
+    run_test "$m" scanf  scanffmt_test.c uni exact "$SCANF_ORACLE"  "-fpc" libm
     # disk needs the file BDOS only emu2 emulates; emu2 now also applies P_LOAD
     # relocation (ravn/emu2-cpm86#1), so it runs medium/compact .CMDs too -- disk
     # is verified in ALL models under emu2. (Requires the reloc-capable emu2; if

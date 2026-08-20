@@ -57,10 +57,11 @@ deliberate: a link failure is a genuine "routine missing from the archive" gap.
 | stdio   | FILE\* write path            | no    | Unicorn |
 | float   | double soft-float arithmetic | no    | Unicorn |
 | math    | sin/cos/atan/exp/log/sqrt    | yes   | Unicorn |
-| fltfmt  | real %e/%f/%g (opt-in)       | yes   | Unicorn |
+| fltfmt  | real %e/%f/%g/%a (opt-in)    | yes   | Unicorn |
+| scanf   | sscanf %f/%d (opt-in)        | yes   | Unicorn |
 | disk    | FILE\* + POSIX file I/O      | no    | emu2    |
 
-**6 tests × 3 models = 18, all green.**
+**7 tests × 3 models = 21, all green.**
 
 ## Runners: why two
 

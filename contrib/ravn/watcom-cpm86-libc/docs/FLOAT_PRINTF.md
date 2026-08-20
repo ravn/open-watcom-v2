@@ -1,4 +1,4 @@
-# Real `%e` / `%f` / `%g` printf on CP/M-86 (opt-in)
+# Real `%e` / `%f` / `%g` / `%a` printf + `scanf` float on CP/M-86 (opt-in)
 
 By default the CP/M-86 clib links the **`noefgfmt` stub**: `printf("%f", ...)`
 compiles and links, but the float conversion prints nothing — `__EFG_printf`
@@ -33,17 +33,43 @@ int main( void )
 wlink format cpm86 ... library clib$MODEL.lib library libm$MODEL.lib
 ```
 
-That is all: `__setEFGfmt()`'s reference pulls `setefg` → `cvt`/`ldcvt`/`efcvt`/
-`gcvt` → `cvtbuf` → `__U8LS` (64-bit shift) from the clib archive, and
-`_EFG_Format`/`__cnvs2d` from libm. A program that never calls `__setEFGfmt()`
-pulls none of it.
+That is all: `__setEFGfmt()`'s reference pulls `setefg` → `efgfmt` (`_EFG_Format`)
+→ `cvt`/`ldcvt`/`efcvt`/`gcvt` → `cvtbuf` → `__U8LS` (64-bit shift) from the clib
+archive, and `__cnvs2d` (scanf side) from libm. A program that never calls
+`__setEFGfmt()` pulls none of it.
+
+## `scanf` / `sscanf` / `fscanf` with `%f`
+
+The read side is symmetric: the same `__setEFGfmt()` call points `__EFG_scanf` at
+`__cnvs2d` (in libm). The scanf family (`scnf` core + `sscanf`/`fscanf`/`scanf`
+entries + `isdigit`/`isspace`/`mbtowc`/`__U8M`) is archived in clib, pulled only
+when you call a `*scanf`. So:
+
+```c
+__setEFGfmt();
+double v; int i;
+sscanf( "3.14159 42", "%lf %d", &v, &i );   /* v=3.14159, i=42 */
+```
+
+Link libm (for `__cnvs2d`) as for printing. Regression: `test/scanffmt_test.c`
+(oracle `n=2 f=314159 i=42`), the `scanf` row of `run-all-models.sh`.
+
+## `%a` hex-float
+
+`printf("%a", 1.5)` -> `0x1.8p+0` works — but ONLY because the clib builds
+`efgfmt.c` from CURRENT source (the prebuilt libm formatter object predates `%a`
+and silently drops it). `build-lib.sh` archives the source `efgfmt` and clib links
+before libm, so the `%a`-capable `_EFG_Format` wins. Covered by the `fltfmt` row.
 
 ## What is archived where
 
-- **clib** (`clib{s,m,c}.lib`, built by `build-lib.sh`): `setefg`, `cvt`,
-  `ldcvt`, `efcvt`, `gcvt`, `cvtbuf`, `i8ls086` — pulled only via `__setEFGfmt`.
-- **libm** (`libm{s,m,c}.lib`): `efgfmt` (`_EFG_Format`), `cnvs2d` (`__cnvs2d`),
-  and all the transcendentals — Watcom's stock 80186-safe soft-float mathlib.
+- **clib** (`clib{s,m,c}.lib`, built by `build-lib.sh`): `setefg`, `efgfmt`
+  (source, `%a`-capable), `cvt`, `ldcvt`, `efcvt`, `gcvt`, `cvtbuf`, `i8ls086` —
+  pulled only via `__setEFGfmt`; and the scanf family (`scnf`/`sscanf`/`fscanf`/
+  `scanf` + `isdigit`/`isspace`/`mbtowc`/`i8m086`) — pulled only via `*scanf`.
+- **libm** (`libm{s,m,c}.lib`): `cnvs2d` (`__cnvs2d`, scanf's double parser) and
+  all the transcendentals — Watcom's stock 80186-safe soft-float mathlib. (Its
+  own `efgfmt` is shadowed by clib's source build, which adds `%a`.)
 
 ## Verification
 
@@ -56,5 +82,7 @@ trap on one).
 
 ## Not done
 
-`scanf("%f")` (the `__cnvs2d` read side) is archived but untested here. `%a`
-(hex-float) is not wired.
+`scanf("%a")` (hex-float READ) is untested — `__cnvs2d` is the prebuilt libm
+parser, which may share the `%a` gap the prebuilt printf formatter had. Console
+`scanf` (stdin) is exercised only via `sscanf` here; the stdin path depends on the
+runner's console-input BDOS.
