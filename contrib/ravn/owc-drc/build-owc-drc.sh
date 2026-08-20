@@ -226,13 +226,16 @@ c90lib-peep-stm8.c c90lib-htab.c stdcbench.c"
     link SCB "$objs"
     cp SCB.CMD "$HERE/SCB.CMD"
     echo "== running SCB.CMD =="
-    # stdcbench times itself with the emulator's RC759 XIOS 16 ms counter
-    # (Int 28h function 19).  One benchmark iteration is heavy, so the emulated
-    # CPU rate must be high enough that an iteration fits inside the module's
-    # timing window (8 s / 40 s); otherwise the single overshooting iteration
-    # makes the score-normalisation underflow to 0.  700000 keeps each module at
-    # one (cheap) iteration while giving reproducible non-zero scores.
-    CPM86_CLOCK_HZ="${CPM86_CLOCK_HZ:-700000}" python3 "$RUNNER" "$HERE/SCB.CMD"
+    # stdcbench times itself with the Concurrent CP/M-86 BDOS T_SECONDS call
+    # (fn 155), read at 1-second resolution -- see stdcbench/portme.c.  Under the
+    # Unicorn runner that clock is the deterministic code-byte counter, which
+    # only advances when the block hook is installed, i.e. in --count mode; a
+    # plain run leaves elapsed time at 0 and the score normalises to 0.  So run
+    # with --count.  One benchmark iteration is heavy, so the emulated CPU rate
+    # (CPM86_CLOCK_HZ) must be high enough that an iteration fits inside the
+    # module's timing window (8 s / 40 s); 700000 keeps each module at one
+    # (cheap) iteration while giving reproducible non-zero scores.
+    CPM86_CLOCK_HZ="${CPM86_CLOCK_HZ:-700000}" python3 "$RUNNER" --count "$HERE/SCB.CMD"
     ;;
 *)
     echo "usage: $0 [hello|mandel|mandel-ow|dhry|stdcbench]" >&2; exit 2;;

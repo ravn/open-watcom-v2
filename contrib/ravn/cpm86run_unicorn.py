@@ -288,6 +288,17 @@ def _load(uc, data, cmdline):
             continue
         want = maxp if (maxp and maxp >= length) else max(minp, length)
         want = max(want, 1)
+        # Clamp to the RAM actually available above this group -- a real CP/M-86
+        # loader grants only as much of the type-3 Extra reservation as physically
+        # fits in the TPA, then the program uses what it got. Without this a large
+        # FARHEAP=<size> (e.g. ~1 MB) would zero-fill past MEM_SIZE and trap
+        # UC_ERR_WRITE_UNMAPPED. Example: free_seg=0x1A00, maxp=0xF000 -> want
+        # clamped to 0x10000-0x1A00 = 0xE600 paras (~920 KB granted of 960 asked).
+        avail = (MEM_SIZE >> 4) - free_seg
+        if avail < 1:
+            avail = 1
+        if want > avail:
+            want = avail
         seg = free_seg
         free_seg += want
         group_seg[gtype] = seg
@@ -368,7 +379,7 @@ def _write_tod(uc, seg, off, base_dt, elapsed_seconds):
 
 
 def run(path, cmdline=None, stdin_bytes=b"", count_insns=False,
-        count_cycles=False):
+        count_cycles=False, dump_path=None):
     """Load and run a .CMD file. Returns the captured console output (str).
 
     cmdline is the command line as an operator would type it, e.g.
@@ -488,6 +499,12 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False,
             # real Concurrent CP/M-86 supports this call; the deprecated XIOS
             # Int 28h fn 19 "16 ms counter" it does NOT (that XIOS never
             # maintains the counter), so self-timing programs must use T_SECONDS.
+            #
+            # IMPORTANT: the elapsed seconds come from state["ticks"], the code-
+            # byte virtual clock, which advances ONLY when the block hook is
+            # installed -- i.e. in a --count/--ticks run (see the FULL-SPEED RULE
+            # below).  A plain run() has ticks==0, so a self-timing benchmark
+            # would see NO elapsed time.  Run such programs with --count.
             elapsed = state["ticks"] // CLOCK_HZ if CLOCK_HZ else 0
             al = _write_tod(uc, ds, dx, state["base_dt"], elapsed)
             uc.mem_write((ds << 4) + ((dx + 4) & 0xFFFF), bytes([al]))
@@ -566,6 +583,14 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False,
         cyc["n"] += model.clocks(pend["insn"], taken=True)
     if state.get("error"):
         raise state["error"]
+    if dump_path:
+        # Full physical-RAM snapshot AFTER the guest finished, for an oracle
+        # INDEPENDENT of the guest's own self-check: the host reads back the
+        # far-heap bytes straight out of RAM (see verify_farheap_dump.py) rather
+        # than trusting the program's printed PASS. 1 MB raw little-endian image,
+        # physical address == file offset.
+        with open(dump_path, "wb") as fh:
+            fh.write(bytes(uc.mem_read(MEM_BASE, MEM_SIZE)))
     if os.environ.get("CPM86_DEBUG_CLOCK"):
         secs = state["ticks"] / CLOCK_HZ if CLOCK_HZ else 0
         ticks16 = int(secs * 1000 // TICK_MS)
@@ -584,14 +609,20 @@ def run(path, cmdline=None, stdin_bytes=b"", count_insns=False,
 def main(argv=None):
     argv = argv or sys.argv[1:]
     count_insns = count_cycles = False
-    while argv and argv[0] in ("--count", "-c", "--ticks", "-t"):
+    dump_path = None
+    while argv and argv[0] in ("--count", "-c", "--ticks", "-t", "--dump"):
         if argv[0] in ("--count", "-c"):
             count_insns = True
+            argv = argv[1:]
+        elif argv[0] == "--dump":
+            dump_path = argv[1]
+            argv = argv[2:]
         else:
             count_cycles = True
-        argv = argv[1:]
+            argv = argv[1:]
     if not argv:
-        print("usage: cpm86run_unicorn.py [--count] [--ticks] FILE.CMD [ARG ...]",
+        print("usage: cpm86run_unicorn.py [--count] [--ticks] [--dump FILE] "
+              "FILE.CMD [ARG ...]",
               file=sys.stderr)
         return 2
     path = argv[0]
@@ -605,7 +636,8 @@ def main(argv=None):
         except Exception:
             stdin_bytes = b""
         result = run(path, cmdline=cmdline, stdin_bytes=stdin_bytes,
-                     count_insns=count_insns, count_cycles=count_cycles)
+                     count_insns=count_insns, count_cycles=count_cycles,
+                     dump_path=dump_path)
         if count_cycles:
             text, n, ticks = result
             sys.stdout.write(text)
