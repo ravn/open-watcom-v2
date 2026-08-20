@@ -241,10 +241,27 @@ AINC="-i=$B/watcom/h -i=$B/comp_cfg/h"
 "$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/fdmth086.asm" -fo=fdmth086.obj  # __FDA/__FDS/__FDM/__FDD (+emu)
 "$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/fdi4086.asm" -fo=fdi4086.obj    # __FDI4: double -> long
 "$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/i4fd086.asm" -fo=i4fd086.obj    # __I4FD: long -> double
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/fdc086.asm"  -fo=fdc086.obj     # __FDC: double compare (x<y etc.)
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/fdn086.asm"  -fo=fdn086.obj     # __FDN: double negate
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/fdfs086.asm" -fo=fdfs086.obj    # __FDFS: double -> single
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/fsfd086.asm" -fo=fsfd086.obj    # __FSFD: single -> double
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/fsn086.asm"  -fo=fsn086.obj     # __FSN: single negate
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/cgsupp/a/fstat086.asm" -fo=fstat086.obj  # FPInvalidOp/FPOverFlow status
 "$WASM" -m$MODEL -0 -i="$B/watcom/h" "$B/clib/fpu/a/chipd16.asm"     -fo=chipd16.obj    # __fdiv_m64r software divider
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" -i="$B/clib/h" "$B/clib/fpu/a/chipw16.asm" -fo=chipw16.obj  # __fpatan_wrap (atan/atan2)
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" -i="$B/clib/h" "$B/clib/fpu/a/chipt16.asm" -fo=chipt16.obj  # __fptan_chk (tan)
+"$WASM" -m$MODEL -0 -i="$B/watcom/h" -i="$B/clib/h" "$B/clib/fpu/a/chipa16.asm" -fo=chipa16.obj  # __fpatan_chk (atan)
 "$WASM" -m$MODEL -0 $AINC "$B/fpuemu/i86/asm/emustub.asm"            -fo=emustub.obj     # FIxRQQ stubs + no-op emu init
 "$WASM" -m$MODEL -0 $AINC "$SRC/port/fpsupport.asm"                  -fo=fpsupport.obj   # F8Over/Under/DivZero
 "$WASM" -m$MODEL -0 $AINC "$SRC/port/fpsoftstub.asm"                 -fo=fpsoftstub.obj  # __real87=0 (force soft path)
+
+# math.h support (transcendentals in libm$MODEL.lib need these clib-side seams)
+"$WCC" $USER -fpc -i=$B/mathlib/h $INC "$B/clib/startup/c/seterrno.c" -fo=seterrno.obj  # __set_EDOM_/__set_ERANGE_
+"$WCC" $USER -fpc -i=$B/mathlib/h $INC "$B/clib/startup/c/rtcntrl.c"   -fo=rtcntrl.obj   # __get_rt_control_ptr_
+"$WCC" $USER -fpc -i=$B/mathlib/h $INC "$B/clib/streamio/c/iobaddr.c"  -fo=iobaddr.obj   # __get_std_stream_ (matherr)
+"$WCC" $USER -fpc -i=$B/mathlib/h $INC "$B/mathlib/c/_matherr.c"       -fo=_matherr.obj  # _matherr
+"$WCC" $USER -fpc -i=$B/mathlib/h $INC "$SRC/port/fesoft.c"           -fo=fesoft.obj    # soft feraiseexcept (no 8087)
+"$WCC" $USER -fpc -i=$B/mathlib/h $INC "$B/clib/math/c/hugeval.c"      -fo=hugeval.obj   # __HugeValue (HUGE_VAL)
 
 echo "==> Layer 2: CP/M-86 seam (BDOS) + closure stubs + port seams"
 "$WCC" $USER $INC "$SRC/port/cominit.c"  -fo=cominit.obj
@@ -290,7 +307,9 @@ rm -f clibcpm.lib
     +fmemneed.obj +fexpand.obj +fheapset.obj +fheapchk.obj +fheapmin.obj +fheapwal.obj \
     +farheap.obj \
     +qsort.obj \
-    +fdmth086.obj +fdi4086.obj +i4fd086.obj +chipd16.obj +emustub.obj +fpsupport.obj +fpsoftstub.obj \
+    +fdmth086.obj +fdi4086.obj +i4fd086.obj +fdc086.obj +fdn086.obj +fdfs086.obj +fsfd086.obj +fsn086.obj +fstat086.obj \
+    +chipd16.obj +chipw16.obj +chipt16.obj +chipa16.obj +emustub.obj +fpsupport.obj +fpsoftstub.obj \
+    +seterrno.obj +rtcntrl.obj +iobaddr.obj +_matherr.obj +fesoft.obj +hugeval.obj \
     +memcpy.obj +fmemcpy.obj +memset.obj +memmove.obj +memcmp.obj +gmtime.obj \
     +i4m.obj +i4d.obj \
     +cominit.obj +cprintf.obj +diskio.obj +lowlevel.obj +errnoptr.obj +abortcpm.obj \
@@ -325,4 +344,27 @@ mkdir -p "$DEST"
 cp clibcpm.lib "$DEST/$LIBNAME"
 cp crt0.obj    "$DEST/$CRT0NAME"
 echo "==> installed canonical: $DEST/{$LIBNAME,$CRT0NAME}"
+
+# --- Per-model math library (libm) --------------------------------------------
+# The transcendentals (sin/cos/tan/atan/exp/log/sqrt/pow ...) are model-SENSITIVE
+# for two reasons even though the arithmetic is identical: (1) code model -> near
+# vs far RET (a medium far-code caller must far-call), (2) data model -> a func's
+# private coefficient tables live in DGROUP (near data: s/m) or embedded in the
+# code segment (far data: c). So there is one libm PER MODEL, exactly like the
+# clib. We archive Watcom's OWN stock 80186-safe SOFT-FLOAT mathlib objects for
+# this model (msdos.286/m$MODEL, verified 0 x87 ESC + 0 286-only opcodes) into
+# libm$MODEL.lib. Kept SEPARATE from clib (the classic -lc/-lm split) so a
+# program that never touches <math.h> pays nothing. Link math programs with
+#   ... library clib$MODEL.lib library libm$MODEL.lib     (compile -fpc, no 8087)
+MATHDIR="$B/mathlib/library/msdos.286/m$MODEL"
+LIBMNAME="libm$MODEL.lib"
+if [ -d "$MATHDIR" ]; then
+    echo "==> Layer 1b: model-$MODEL math library (transcendentals, soft-float)"
+    rm -f "$LIBMNAME"
+    "$WLIB" -q -b "$LIBMNAME" $(printf '+%s ' "$MATHDIR"/*.obj) >/dev/null 2>&1
+    cp "$LIBMNAME" "$DEST/$LIBMNAME"
+    echo "==> installed math lib: $DEST/$LIBMNAME ($("$WLIB" "$LIBMNAME" 2>/dev/null | grep -c '\.obj') modules)"
+else
+    echo "!! math lib dir $MATHDIR not found -- skipping libm for model $MODEL" >&2
+fi
 echo "DONE."
